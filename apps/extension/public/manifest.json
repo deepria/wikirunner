@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "WikiRunner",
+  "description": "나무위키 내부 링크 스피드런을 기록합니다.",
+  "version": "0.1.1",
+  "permissions": ["alarms", "storage", "tabs", "webNavigation"],
+  "host_permissions": [
+    "https://namu.wiki/*",
+    "https://*.supabase.co/*",
+    "http://127.0.0.1:54321/*"
+  ],
+  "background": {
+    "service_worker": "assets/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "WikiRunner"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://namu.wiki/w/*"],
+      "js": ["assets/content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

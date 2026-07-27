@@ -1,0 +1,21 @@
+{
+  "name": "@wikirunner/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.110.8",
+    "@wikirunner/contracts": "workspace:*",
+    "@wikirunner/namuwiki": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.2.2",
+    "typescript": "7.0.2",
+    "vite": "8.1.5"
+  }
+}

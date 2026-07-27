@@ -1,0 +1,23 @@
+{
+  "name": "wikirunner",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.26.1",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --sort --if-present build",
+    "dev:web": "pnpm --filter @wikirunner/web dev",
+    "dev:extension": "pnpm --filter @wikirunner/extension dev",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --sort --if-present typecheck"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.5",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

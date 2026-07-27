@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WikiRunner</title>
+    <style>
+      body {
+        width: 300px;
+        margin: 0;
+        padding: 20px;
+        color: #191b1a;
+        background: #f4f1e8;
+        font-family: Arial, "Apple SD Gothic Neo", sans-serif;
+      }
+      h1 {
+        margin: 0;
+        font-size: 22px;
+        letter-spacing: -1px;
+      }
+      p {
+        color: #686b66;
+        line-height: 1.5;
+      }
+      .badge {
+        display: inline-block;
+        padding: 6px 8px;
+        border: 1px solid #191b1a;
+        background: #d9ff43;
+        font-size: 12px;
+        font-weight: 800;
+      }
+      form {
+        display: grid;
+        gap: 10px;
+        margin-top: 16px;
+      }
+      .game-controls {
+        display: grid;
+        gap: 8px;
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid #c9c8bf;
+      }
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 12px;
+        font-weight: 800;
+      }
+      input,
+      button {
+        min-height: 40px;
+        border: 1px solid #191b1a;
+        border-radius: 0;
+        font: inherit;
+      }
+      input {
+        padding: 0 10px;
+        background: #fffef8;
+        font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+        font-size: 16px;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+      button {
+        background: #d9ff43;
+        font-weight: 800;
+        cursor: pointer;
+      }
+      button:disabled {
+        background: #c9c8bf;
+        color: #686b66;
+        cursor: default;
+      }
+      .danger {
+        color: #fff;
+        background: #a32314;
+      }
+      .error {
+        color: #a32314;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      [hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>WikiRunner</h1>
+    <p id="description">확장 프로그램 상태를 확인하는 중입니다.</p>
+    <span class="badge" id="status">확인 중</span>
+    <form id="pairing-form" hidden>
+      <label>
+        페어링 코드
+        <input
+          id="pairing-code"
+          required
+          autocomplete="off"
+          maxlength="9"
+          placeholder="ABCD-EFGH"
+        />
+      </label>
+      <button id="pairing-button" type="submit">웹 계정과 연결</button>
+      <p class="error" id="pairing-error" role="alert"></p>
+    </form>
+    <section class="game-controls" id="game-controls" hidden>
+      <button class="danger" id="abandon-button" type="button">이번 경기 포기</button>
+      <p class="error" id="abandon-error" role="alert"></p>
+    </section>
+    <script type="module" src="/src/popup.ts"></script>
+  </body>
+</html>
