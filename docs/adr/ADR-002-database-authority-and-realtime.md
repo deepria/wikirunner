@@ -1,6 +1,6 @@
-# ADR-002: DB 권위 상태와 Realtime projection
+# ADR-002: DB 권위 상태와 Realtime 동기화
 
-- 상태: 승인
+- 상태: 승인, 현재 구현 반영
 - 날짜: 2026-07-27
 
 ## 배경
@@ -13,12 +13,13 @@ Realtime 메시지는 빠르지만 누락·중복·재정렬될 수 있고, 연�
 - PostgreSQL을 방·경기·run·순위 상태의 단일 진실의 원천으로 사용한다.
 - 여러 테이블을 바꾸는 명령은 Edge Function에서 권한을 확인한 뒤 단일 RPC 트랜잭션으로
   실행한다.
-- Realtime에는 참가자에게 허용된 projection만 발행한다.
-- 구독 직후, 재연결 후, version 또는 sequence 누락 시 DB snapshot을 다시 조회한다.
+- Realtime table 변경은 RLS로 참가자 범위를 제한한다.
+- 확장 프로그램은 Realtime을 변경 알림으로만 사용하고 알림·재연결 후 DB snapshot을 다시
+  조회한다.
+- 웹은 현재 3초 주기로 snapshot을 조회한다. 웹 Realtime 연결은 후속 개선으로 둔다.
 - 클라이언트의 테이블 직접 쓰기는 RLS로 거부한다.
 
 ## 결과
 
-복구와 동시성 규칙이 명확해진다. Realtime 화면은 반드시 snapshot fallback과 resource
-version 비교를 구현해야 한다.
-
+복구와 동시성 규칙이 명확해진다. Realtime payload나 웹의 로컬 상태를 권위 데이터로 사용하지
+않으며, 모든 클라이언트는 snapshot fallback을 유지해야 한다.

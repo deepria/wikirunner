@@ -52,6 +52,7 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
 ```dotenv
 VITE_SUPABASE_URL=https://<project-ref>.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
+VITE_WEB_APP_URL=http://localhost:3000
 ```
 
 `PAIRING_CODE_SECRET`는 **클라이언트 환경 변수에 넣지 않습니다.** 서버의 Edge Function 시크릿으로만 설정합니다.
@@ -116,7 +117,7 @@ supabase stop
 ## 이용 방법
 
 1. 웹 앱에서 익명으로 접속한 뒤 **새 방 만들기** 또는 초대 코드로 방에 참가합니다.
-2. 호스트가 시작 문서와 목표 문서를 설정합니다.
+2. 방장이 시작·목표 문서를 직접 설정하거나, 연결한 확장 프로그램에서 난이도를 고르고 랜덤 경로를 추첨합니다.
 3. 각 참가자는 **페어링 코드 발급**을 누르고, Chrome 확장 프로그램 팝업에 코드를 입력해 연결합니다.
 4. 모든 참가자가 **준비 완료**를 누르면 호스트가 10초 카운트다운을 시작합니다.
 5. 카운트다운이 끝나면 확장 프로그램이 시작 문서를 연 전용 나무위키 탭을 만듭니다.
@@ -180,6 +181,8 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
 
 배포가 끝난 뒤 운영 도메인을 Supabase Auth의 Site URL·Redirect URLs에 반영하고, 실제 운영 주소에서 방 생성과 익명 로그인을 확인합니다.
 
+확장 프로그램을 빌드할 때는 `VITE_WEB_APP_URL`에도 이 운영 주소를 설정합니다.
+
 ### 4. Chrome 확장 프로그램 배포
 
 운영 Supabase 값을 넣은 `apps/extension/.env.local`로 확장 프로그램을 다시 빌드합니다.
@@ -211,8 +214,6 @@ pnpm --filter @wikirunner/extension build
 
 - [기획서](docs/기획서.md)
 - [아키텍처](docs/아키텍처.md)
-- [작업 분해 구조(WBS)](docs/WBS.md)
-- [사용자 필요 작업](docs/사용자_필요작업.md)
 - [진행 현황](docs/진행현황.md)
 - [아키텍처 결정 기록](docs/adr)
 
