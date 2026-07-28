@@ -11,6 +11,7 @@ import {
   disconnectExtension,
   type GeneratedPathArticle,
   getExtensionSnapshot,
+  reportFairPlayViolation,
   submitGeneratedRandomPath,
   submitNavigationEvent,
 } from "./game-api";
@@ -21,6 +22,7 @@ const OUTBOX_RETRY_ALARM = "wikirunner-outbox-retry";
 const LINK_INTENT_MAX_AGE_MS = 15_000;
 const LINK_INTENT_GRACE_MS = 250;
 const CONTENT_NAVIGATION_GRACE_MS = 350;
+const FAIR_PLAY_RULE_IDS = [70_001, 70_002] as const;
 let roomChannel: RealtimeChannel | undefined;
 let subscribedRoomId: string | undefined;
 let pendingRoomSubscription: { roomId: string; promise: Promise<void> } | undefined;
@@ -28,6 +30,7 @@ let roomSubscriptionQueue = Promise.resolve();
 let navigationPipeline = Promise.resolve();
 let isFlushingOutbox = false;
 const recentNavigationSignals = new Map<number, { articleKey: string; observedAt: number }>();
+const recentFairPlayReports = new Map<"search_attempt" | "new_tab", number>();
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.storage.local.set({
@@ -76,6 +79,17 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
         }),
       );
     return true;
+  }
+
+  if (isFairPlayStateRequestMessage(message) && sender.tab?.id !== undefined) {
+    void getFairPlayState(sender.tab.id)
+      .then(sendResponse)
+      .catch(() => sendResponse({ enabled: false }));
+    return true;
+  }
+
+  if (isFairPlayBlockedMessage(message) && sender.tab?.id !== undefined) {
+    void reportFairPlayBlock(message.violationType, sender.tab.id);
   }
 
   if (isLinkIntentMessage(message) && sender.tab?.id !== undefined && sender.frameId === 0) {
@@ -385,6 +399,7 @@ async function disconnectPairing(): Promise<void> {
 
   await chrome.alarms.clear(GAME_START_ALARM);
   await chrome.alarms.clear(OUTBOX_RETRY_ALARM);
+  await clearFairPlayRules();
   await chrome.storage.session.remove("pendingLinkIntent");
   await chrome.storage.local.remove([
     "activeRoomId",
@@ -405,6 +420,7 @@ async function disconnectPairing(): Promise<void> {
     "lastObservedNavigation",
   ]);
   recentNavigationSignals.clear();
+  recentFairPlayReports.clear();
 }
 
 async function refreshRoom(roomId: string): Promise<void> {
@@ -485,7 +501,9 @@ async function synchronizeGame(snapshot: RoomSnapshot): Promise<void> {
   const scheduledTime = new Date(activeGame.scheduledAt).getTime();
   if (scheduledTime <= Date.now()) {
     const { gameTabId } = await chrome.storage.local.get(["gameTabId"]);
-    if (typeof gameTabId !== "number") {
+    if (typeof gameTabId === "number") {
+      await enableFairPlayRules(gameTabId);
+    } else {
       await openScheduledGame();
     }
   } else {
@@ -515,10 +533,58 @@ async function openScheduledGame(): Promise<void> {
     const created = await chrome.tabs.create({ active: true, url: startUrl });
     tabId = created.id;
   }
+  if (tabId === undefined) {
+    throw new Error("경기 탭을 열지 못했습니다.");
+  }
 
   await chrome.storage.local.set({
     gameTabId: tabId,
     gameOpenedAt: new Date().toISOString(),
+  });
+  await enableFairPlayRules(tabId);
+}
+
+async function getFairPlayState(tabId: number): Promise<{ enabled: boolean }> {
+  const { activeGame, gameTabId } = await chrome.storage.local.get(["activeGame", "gameTabId"]);
+  return {
+    enabled:
+      isActiveGame(activeGame) &&
+      gameTabId === tabId &&
+      Date.now() >= new Date(activeGame.scheduledAt).getTime(),
+  };
+}
+
+async function enableFairPlayRules(tabId: number): Promise<void> {
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: [...FAIR_PLAY_RULE_IDS],
+    addRules: [
+      {
+        id: FAIR_PLAY_RULE_IDS[0],
+        priority: 1,
+        action: { type: "block" },
+        condition: {
+          regexFilter: "^https?://namu\\.wiki/random(?:[/?#]|$)",
+          resourceTypes: ["main_frame"],
+          tabIds: [tabId],
+        },
+      },
+      {
+        id: FAIR_PLAY_RULE_IDS[1],
+        priority: 1,
+        action: { type: "block" },
+        condition: {
+          regexFilter: "^https?://namu\\.wiki/(?:Search|search)(?:[/?#]|$)",
+          resourceTypes: ["main_frame"],
+          tabIds: [tabId],
+        },
+      },
+    ],
+  });
+}
+
+async function clearFairPlayRules(): Promise<void> {
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: [...FAIR_PLAY_RULE_IDS],
   });
 }
 
@@ -547,10 +613,14 @@ async function observeNavigation(signal: NavigationSignal): Promise<void> {
   if (
     !isActiveGame(activeGame) ||
     !isActiveRun(activeRun) ||
-    signal.tabId !== gameTabId ||
     Date.now() < new Date(activeGame.scheduledAt).getTime() ||
     activeRun.status === "finished"
   ) {
+    return;
+  }
+
+  if (signal.tabId !== gameTabId) {
+    await reportFairPlayBlock("new_tab", signal.tabId);
     return;
   }
 
@@ -616,6 +686,41 @@ async function observeNavigation(signal: NavigationSignal): Promise<void> {
   });
   await chrome.storage.session.remove("pendingLinkIntent");
   await flushOutbox();
+}
+
+async function reportFairPlayBlock(
+  type: "search_attempt" | "new_tab",
+  tabId: number,
+): Promise<void> {
+  const { activeGame, activeRun, gameTabId } = await chrome.storage.local.get([
+    "activeGame",
+    "activeRun",
+    "gameTabId",
+  ]);
+  if (
+    !isActiveGame(activeGame) ||
+    !isActiveRun(activeRun) ||
+    Date.now() < new Date(activeGame.scheduledAt).getTime() ||
+    activeRun.status === "finished" ||
+    (type === "search_attempt" && tabId !== gameTabId)
+  ) {
+    return;
+  }
+  const lastReportedAt = recentFairPlayReports.get(type) ?? 0;
+  if (Date.now() - lastReportedAt < 5_000) {
+    return;
+  }
+  recentFairPlayReports.set(type, Date.now());
+  try {
+    await reportFairPlayViolation(activeGame.gameId, activeRun.runId, type);
+    await chrome.storage.local.set({
+      activeRun: { ...activeRun, violationStatus: "warned" },
+    });
+  } catch (error) {
+    await chrome.storage.local.set({
+      lastEventError: error instanceof Error ? error.message : "경고 기록을 전송하지 못했습니다.",
+    });
+  }
 }
 
 function classifyNavigation(
@@ -777,6 +882,7 @@ async function resetActiveGame(
 
   await chrome.alarms.clear(GAME_START_ALARM);
   await chrome.alarms.clear(OUTBOX_RETRY_ALARM);
+  await clearFairPlayRules();
   await chrome.storage.session.remove("pendingLinkIntent");
   await chrome.storage.local.remove([
     "activeGame",
@@ -792,6 +898,7 @@ async function resetActiveGame(
     lastFinalizedGameId: gameId ?? null,
   });
   recentNavigationSignals.clear();
+  recentFairPlayReports.clear();
 }
 
 async function appendToOutbox(entry: NavigationOutboxEntry): Promise<void> {
@@ -906,6 +1013,15 @@ interface GenerateRandomPathMessage {
   difficulty: RandomDifficulty;
 }
 
+interface FairPlayStateRequestMessage {
+  type: "GET_FAIR_PLAY_STATE";
+}
+
+interface FairPlayBlockedMessage {
+  type: "FAIR_PLAY_BLOCKED";
+  violationType: "search_attempt";
+}
+
 interface LinkIntentMessage {
   type: "LINK_INTENT";
   fromArticleKey: string;
@@ -952,6 +1068,23 @@ function isGenerateRandomPathMessage(value: unknown): value is GenerateRandomPat
     (candidate.difficulty === "easy" ||
       candidate.difficulty === "normal" ||
       candidate.difficulty === "hard")
+  );
+}
+
+function isFairPlayStateRequestMessage(value: unknown): value is FairPlayStateRequestMessage {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value as Partial<FairPlayStateRequestMessage>).type === "GET_FAIR_PLAY_STATE"
+  );
+}
+
+function isFairPlayBlockedMessage(value: unknown): value is FairPlayBlockedMessage {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value as Partial<FairPlayBlockedMessage>).type === "FAIR_PLAY_BLOCKED" &&
+    (value as Partial<FairPlayBlockedMessage>).violationType === "search_attempt"
   );
 }
 

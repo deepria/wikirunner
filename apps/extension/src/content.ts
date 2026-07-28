@@ -50,6 +50,15 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
         font-size: 11px;
         font-weight: 700;
       }
+      .fair-play-notice {
+        padding: 9px 12px;
+        border-bottom: 1px solid #4c4f4c;
+        background: #a32314;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.4;
+      }
       strong {
         color: #d9ff43;
         font-size: 13px;
@@ -91,6 +100,7 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
         <strong id="finish-title">경기 진행중.. 달리세요!</strong>
         <span id="finish-detail">완주 기록을 전송 중입니다.</span>
       </div>
+      <div class="fair-play-notice" id="fair-play-notice" hidden role="status" aria-live="polite"></div>
       <dl>
         <dt>현재</dt><dd id="current-article" title="${escapeHtml(article.title)}">${escapeHtml(
           article.title,
@@ -124,11 +134,14 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
   const finishBanner = shadow.querySelector<HTMLElement>("#finish-banner");
   const finishTitleElement = shadow.querySelector<HTMLElement>("#finish-title");
   const finishDetailElement = shadow.querySelector<HTMLElement>("#finish-detail");
+  const fairPlayNotice = shadow.querySelector<HTMLElement>("#fair-play-notice");
   let activeGame: ActiveGame | undefined;
   let activeRun: ActiveRun | undefined;
   let lastEventError: string | undefined;
   let lastGameOutcome: GameOutcome | undefined;
   let lastCompletedGame: CompletedGame | undefined;
+  let fairPlayEnabled = false;
+  let fairPlayNoticeTimer: number | undefined;
 
   const renderGame = () => {
     if (
@@ -251,7 +264,148 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
         : undefined;
     }
     renderGame();
+    if (changes.activeGame || changes.gameTabId) {
+      void synchronizeFairPlayBlocking();
+    }
   });
+
+  async function synchronizeFairPlayBlocking(): Promise<void> {
+    try {
+      const response: unknown = await chrome.runtime.sendMessage({ type: "GET_FAIR_PLAY_STATE" });
+      fairPlayEnabled =
+        response !== null &&
+        typeof response === "object" &&
+        (response as { enabled?: unknown }).enabled === true;
+    } catch {
+      fairPlayEnabled = false;
+    }
+    applyFairPlayUiBlocking();
+  }
+
+  function applyFairPlayUiBlocking(): void {
+    document.documentElement.classList.toggle("wikirunner-fair-play-active", fairPlayEnabled);
+    for (const target of document.querySelectorAll<HTMLElement>(
+      'input[type="search"], a[href="/random"], a[title="검색"], a[title="아무 문서로 이동"]',
+    )) {
+      const container = target.matches('input[type="search"]')
+        ? target.closest("form")?.parentElement
+        : target.closest("a");
+      (container ?? target).classList.toggle("wikirunner-fair-play-hidden", fairPlayEnabled);
+    }
+    for (const link of document.querySelectorAll<HTMLAnchorElement>("a")) {
+      if (link.textContent?.replaceAll(/\s+/g, "").includes("실시간검색어")) {
+        (link.closest("li") ?? link).classList.toggle(
+          "wikirunner-fair-play-hidden",
+          fairPlayEnabled,
+        );
+      }
+    }
+  }
+
+  function showFairPlayNotice(message: string): void {
+    if (!fairPlayNotice) {
+      return;
+    }
+    fairPlayNotice.textContent = message;
+    fairPlayNotice.hidden = false;
+    if (fairPlayNoticeTimer !== undefined) {
+      window.clearTimeout(fairPlayNoticeTimer);
+    }
+    fairPlayNoticeTimer = window.setTimeout(() => {
+      fairPlayNotice.hidden = true;
+    }, 3_000);
+  }
+
+  function reportBlockedSearchAttempt(): void {
+    void chrome.runtime.sendMessage({
+      type: "FAIR_PLAY_BLOCKED",
+      violationType: "search_attempt",
+    });
+  }
+
+  function isBlockedFairPlayControl(target: Element): boolean {
+    if (target.closest('input[type="search"]')) {
+      return true;
+    }
+    const link = target.closest<HTMLAnchorElement>("a");
+    if (!link) {
+      return false;
+    }
+    const href = link.getAttribute("href") ?? "";
+    const title = link.getAttribute("title") ?? "";
+    return (
+      href === "/random" ||
+      /^\/(?:Search|search)(?:[/?#]|$)/.test(href) ||
+      title === "검색" ||
+      title === "아무 문서로 이동"
+    );
+  }
+
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (
+        !fairPlayEnabled ||
+        !(event.target instanceof Element) ||
+        !isBlockedFairPlayControl(event.target)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      reportBlockedSearchAttempt();
+      showFairPlayNotice("경기 중에는 검색과 랜덤 문서 이동을 사용할 수 없습니다.");
+    },
+    { capture: true },
+  );
+
+  document.addEventListener(
+    "submit",
+    (event) => {
+      if (!fairPlayEnabled || !(event.target instanceof HTMLFormElement)) {
+        return;
+      }
+      if (!event.target.querySelector('input[type="search"]')) {
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      reportBlockedSearchAttempt();
+      showFairPlayNotice("경기 중에는 문서 검색을 사용할 수 없습니다.");
+    },
+    { capture: true },
+  );
+
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (!fairPlayEnabled) {
+        return;
+      }
+      const target = event.target instanceof Element ? event.target : null;
+      const isSearchInput = target?.matches('input[type="search"]') ?? false;
+      const isSearchShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k";
+      const isSlashShortcut =
+        event.key === "/" && !target?.matches("input, textarea, [contenteditable=true]");
+      if (!isSearchInput && !isSearchShortcut && !isSlashShortcut) {
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      reportBlockedSearchAttempt();
+      showFairPlayNotice("경기 중에는 문서 검색 단축키를 사용할 수 없습니다.");
+    },
+    { capture: true },
+  );
+
+  const fairPlayStyle = document.createElement("style");
+  fairPlayStyle.textContent = ".wikirunner-fair-play-hidden { display: none !important; }";
+  document.documentElement.append(fairPlayStyle);
+  new MutationObserver(() => applyFairPlayUiBlocking()).observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+  void synchronizeFairPlayBlocking();
 
   document.addEventListener(
     "click",

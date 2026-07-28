@@ -130,6 +130,28 @@ export async function abandonRun(gameId: string, runId: string): Promise<Abandon
   return serverEnvelopeSchema(abandonRunResultSchema).parse(envelope).data;
 }
 
+export async function reportFairPlayViolation(
+  gameId: string,
+  runId: string,
+  type: "search_attempt" | "new_tab",
+): Promise<void> {
+  const idempotencyKey = crypto.randomUUID();
+  await apiFetch(`/v1/games/${gameId}/violations`, {
+    method: "POST",
+    body: JSON.stringify({
+      schemaVersion: 1,
+      idempotencyKey,
+      gameId,
+      runId,
+      type,
+    }),
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey,
+    },
+  });
+}
+
 async function apiFetch(path: string, init: RequestInit): Promise<unknown> {
   const url = import.meta.env.VITE_SUPABASE_URL;
   const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;

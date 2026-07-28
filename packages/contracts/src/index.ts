@@ -142,6 +142,12 @@ export const abandonRunCommandSchema = commandMetaSchema.extend({
   runId: idSchema,
 });
 
+export const reportFairPlayViolationCommandSchema = commandMetaSchema.extend({
+  gameId: idSchema,
+  runId: idSchema,
+  type: z.enum(["search_attempt", "new_tab"]),
+});
+
 export const navigationEventSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
   clientEventId: idSchema,
@@ -353,6 +359,7 @@ export type StartCountdownCommand = z.infer<typeof startCountdownCommandSchema>;
 export type PrepareNextGameCommand = z.infer<typeof prepareNextGameCommandSchema>;
 export type EndGameCommand = z.infer<typeof endGameCommandSchema>;
 export type AbandonRunCommand = z.infer<typeof abandonRunCommandSchema>;
+export type ReportFairPlayViolationCommand = z.infer<typeof reportFairPlayViolationCommandSchema>;
 export type NavigationEvent = z.infer<typeof navigationEventSchema>;
 export type SubmitNavigationEventsCommand = z.infer<typeof submitNavigationEventsCommandSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;

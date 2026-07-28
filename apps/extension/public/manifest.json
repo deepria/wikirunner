@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "WikiRunner",
   "description": "나무위키 내부 링크 스피드런을 기록합니다.",
-  "version": "0.1.18",
-  "permissions": ["alarms", "storage", "tabs", "webNavigation"],
+  "version": "0.1.20",
+  "permissions": ["alarms", "declarativeNetRequest", "storage", "tabs", "webNavigation"],
   "host_permissions": [
     "https://namu.wiki/*",
     "https://*.supabase.co/*",

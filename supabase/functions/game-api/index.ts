@@ -136,6 +136,12 @@ const abandonRunSchema = commandSchema.extend({
   runId: z.string().uuid(),
 });
 
+const reportFairPlayViolationSchema = commandSchema.extend({
+  gameId: z.string().uuid(),
+  runId: z.string().uuid(),
+  type: z.enum(["search_attempt", "new_tab"]),
+});
+
 const roomIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type ApiErrorCode =
@@ -306,6 +312,8 @@ Deno.serve(async (request) => {
       response = await submitNavigationEvents(request, path, supabase, requestId);
     } else if (request.method === "POST" && path.match(/^\/v1\/games\/[^/]+\/abandon$/)) {
       response = await abandonRun(request, path, supabase, requestId);
+    } else if (request.method === "POST" && path.match(/^\/v1\/games\/[^/]+\/violations$/)) {
+      response = await reportFairPlayViolation(request, path, supabase, requestId);
     } else if (request.method === "GET" && path.match(/^\/v1\/rooms\/[^/]+\/snapshot$/)) {
       response = await getRoomSnapshot(path, supabase, requestId);
     } else if (request.method === "GET" && path.match(/^\/v1\/games\/[^/]+\/routes$/)) {
@@ -682,6 +690,40 @@ async function abandonRun(
     return databaseErrorResponse(error, requestId);
   }
 
+  return successResponse(data);
+}
+
+async function reportFairPlayViolation(
+  request: Request,
+  path: string,
+  supabase: SupabaseClient,
+  requestId: string,
+): Promise<Response> {
+  const pathGameId = path.split("/")[3];
+  if (!pathGameId || !roomIdPattern.test(pathGameId)) {
+    return errorResponse("INVALID_REQUEST", "올바르지 않은 경기 ID입니다.", requestId, 400);
+  }
+  const input = await parseCommand(request, reportFairPlayViolationSchema, requestId);
+  if (input instanceof Response) {
+    return input;
+  }
+  if (input.gameId !== pathGameId) {
+    return errorResponse(
+      "INVALID_REQUEST",
+      "요청 경로와 본문의 경기 ID가 일치하지 않습니다.",
+      requestId,
+      400,
+    );
+  }
+  const { data, error } = await supabase.rpc("report_fair_play_violation", {
+    p_game_id: input.gameId,
+    p_run_id: input.runId,
+    p_type: input.type,
+    p_idempotency_key: input.idempotencyKey,
+  });
+  if (error) {
+    return databaseErrorResponse(error, requestId);
+  }
   return successResponse(data);
 }
 
