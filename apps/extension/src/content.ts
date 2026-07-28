@@ -34,6 +34,22 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
         padding: 10px 12px;
         border-bottom: 1px solid #4c4f4c;
       }
+      .finish-banner {
+        display: grid;
+        gap: 3px;
+        padding: 12px;
+        border-bottom: 1px solid #4c4f4c;
+        background: #d9ff43;
+        color: #191b1a;
+      }
+      .finish-banner strong {
+        color: inherit;
+        font-size: 16px;
+      }
+      .finish-banner span {
+        font-size: 11px;
+        font-weight: 700;
+      }
       strong {
         color: #d9ff43;
         font-size: 13px;
@@ -71,6 +87,10 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
         <strong>WikiRunner</strong>
         <button type="button" aria-label="오버레이 접기" aria-expanded="true">−</button>
       </header>
+      <div class="finish-banner" id="finish-banner" hidden role="status" aria-live="polite">
+        <strong id="finish-title">경기 진행중.. 달리세요!</strong>
+        <span id="finish-detail">완주 기록을 전송 중입니다.</span>
+      </div>
       <dl>
         <dt>현재</dt><dd id="current-article" title="${escapeHtml(article.title)}">${escapeHtml(
           article.title,
@@ -101,9 +121,14 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
   const timerElement = shadow.querySelector<HTMLElement>("#timer");
   const moveCountElement = shadow.querySelector<HTMLElement>("#move-count");
   const statusElement = shadow.querySelector<HTMLElement>("#game-status");
+  const finishBanner = shadow.querySelector<HTMLElement>("#finish-banner");
+  const finishTitleElement = shadow.querySelector<HTMLElement>("#finish-title");
+  const finishDetailElement = shadow.querySelector<HTMLElement>("#finish-detail");
   let activeGame: ActiveGame | undefined;
   let activeRun: ActiveRun | undefined;
   let lastEventError: string | undefined;
+  let lastGameOutcome: GameOutcome | undefined;
+  let lastCompletedGame: CompletedGame | undefined;
 
   const renderGame = () => {
     if (
@@ -111,7 +136,10 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
       !targetElement ||
       !timerElement ||
       !moveCountElement ||
-      !statusElement
+      !statusElement ||
+      !finishBanner ||
+      !finishTitleElement ||
+      !finishDetailElement
     ) {
       return;
     }
@@ -121,7 +149,17 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
       targetElement.textContent = "연결 대기";
       timerElement.textContent = "--:--.--";
       moveCountElement.textContent = "0회";
-      statusElement.textContent = "미연결";
+      const isCompletedAtCurrentArticle =
+        lastGameOutcome?.outcome === "finished" &&
+        lastCompletedGame?.targetArticleKey === currentArticle.articleKey;
+      finishBanner.hidden = !isCompletedAtCurrentArticle;
+      if (isCompletedAtCurrentArticle && lastCompletedGame) {
+        finishTitleElement.textContent = "완주 기록 완료!";
+        finishDetailElement.textContent = `${lastCompletedGame.targetArticleTitle}에 도착했습니다.`;
+        statusElement.textContent = "완주";
+      } else {
+        statusElement.textContent = "미연결";
+      }
       return;
     }
 
@@ -131,16 +169,33 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
     const scheduledTime = new Date(activeGame.scheduledAt).getTime();
     const delta = Date.now() - scheduledTime;
     if (delta < 0) {
+      finishBanner.hidden = true;
       timerElement.textContent = `-${Math.ceil(Math.abs(delta) / 1000)}초`;
       statusElement.textContent = "카운트다운";
       return;
     }
 
     timerElement.textContent = formatElapsed(delta);
+    const hasRecordedTargetArrival =
+      (activeRun?.lastSequence ?? 0) > 0 &&
+      currentArticle.articleKey === activeGame.targetArticleKey &&
+      activeRun?.lastArticleKey === activeGame.targetArticleKey;
+    finishBanner.hidden = !hasRecordedTargetArrival;
+    if (hasRecordedTargetArrival) {
+      if (lastEventError) {
+        finishTitleElement.textContent = "경기 진행중.. 달리세요!";
+        finishDetailElement.textContent = "완주 기록 전송을 다시 시도하고 있습니다.";
+      } else if (activeRun?.status === "finished") {
+        finishTitleElement.textContent = "완주 기록 완료!";
+        finishDetailElement.textContent = "기록이 서버에 저장되었습니다.";
+      } else {
+        finishTitleElement.textContent = "경기 진행중.. 달리세요!";
+        finishDetailElement.textContent = "완주 기록을 전송 중입니다.";
+      }
+    }
     statusElement.textContent = lastEventError
       ? "기록 전송 오류"
-      : activeRun?.status === "finished" ||
-          currentArticle.articleKey === activeGame.targetArticleKey
+      : activeRun?.status === "finished"
         ? "완주"
         : activeRun?.violationStatus === "warned"
           ? "진행 중 · 경고 있음"
@@ -149,13 +204,23 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
   };
 
   void chrome.storage.local
-    .get(["activeGame", "activeRun", "lastEventError"])
-    .then(({ activeGame: storedGame, activeRun: storedRun, lastEventError: storedError }) => {
-      activeGame = isActiveGame(storedGame) ? storedGame : undefined;
-      activeRun = isActiveRun(storedRun) ? storedRun : undefined;
-      lastEventError = typeof storedError === "string" ? storedError : undefined;
-      renderGame();
-    });
+    .get(["activeGame", "activeRun", "lastEventError", "lastGameOutcome", "lastCompletedGame"])
+    .then(
+      ({
+        activeGame: storedGame,
+        activeRun: storedRun,
+        lastEventError: storedError,
+        lastGameOutcome: storedOutcome,
+        lastCompletedGame: storedCompletedGame,
+      }) => {
+        activeGame = isActiveGame(storedGame) ? storedGame : undefined;
+        activeRun = isActiveRun(storedRun) ? storedRun : undefined;
+        lastEventError = typeof storedError === "string" ? storedError : undefined;
+        lastGameOutcome = isGameOutcome(storedOutcome) ? storedOutcome : undefined;
+        lastCompletedGame = isCompletedGame(storedCompletedGame) ? storedCompletedGame : undefined;
+        renderGame();
+      },
+    );
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") {
@@ -174,6 +239,16 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
         typeof changes.lastEventError.newValue === "string"
           ? changes.lastEventError.newValue
           : undefined;
+    }
+    if (changes.lastGameOutcome) {
+      lastGameOutcome = isGameOutcome(changes.lastGameOutcome.newValue)
+        ? changes.lastGameOutcome.newValue
+        : undefined;
+    }
+    if (changes.lastCompletedGame) {
+      lastCompletedGame = isCompletedGame(changes.lastCompletedGame.newValue)
+        ? changes.lastCompletedGame.newValue
+        : undefined;
     }
     renderGame();
   });
@@ -211,9 +286,11 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
   window.setInterval(() => {
     const observedArticle = normalizeNamuWikiUrl(window.location.href);
     if (observedArticle.ok && observedArticle.articleKey !== currentArticle.articleKey) {
+      const previousArticle = currentArticle;
       currentArticle = observedArticle;
       void chrome.runtime.sendMessage({
         type: "PAGE_NAVIGATION_OBSERVED",
+        fromArticleKey: previousArticle.articleKey,
         articleKey: observedArticle.articleKey,
         observedAt: new Date().toISOString(),
       });
@@ -248,8 +325,20 @@ interface ActiveGame {
 
 interface ActiveRun {
   status: "waiting" | "running" | "finished";
+  lastSequence: number;
+  lastArticleKey: string;
   moveCount: number;
   violationStatus: "clear" | "warned" | "reviewed";
+}
+
+interface GameOutcome {
+  outcome: "finished" | "abandoned";
+  occurredAt: string;
+}
+
+interface CompletedGame {
+  targetArticleKey: string;
+  targetArticleTitle: string;
 }
 
 function isActiveGame(value: unknown): value is ActiveGame {
@@ -273,9 +362,33 @@ function isActiveRun(value: unknown): value is ActiveRun {
     (candidate.status === "waiting" ||
       candidate.status === "running" ||
       candidate.status === "finished") &&
+    typeof candidate.lastSequence === "number" &&
+    typeof candidate.lastArticleKey === "string" &&
     typeof candidate.moveCount === "number" &&
     (candidate.violationStatus === "clear" ||
       candidate.violationStatus === "warned" ||
       candidate.violationStatus === "reviewed")
+  );
+}
+
+function isGameOutcome(value: unknown): value is GameOutcome {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<GameOutcome>;
+  return (
+    (candidate.outcome === "finished" || candidate.outcome === "abandoned") &&
+    typeof candidate.occurredAt === "string"
+  );
+}
+
+function isCompletedGame(value: unknown): value is CompletedGame {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<CompletedGame>;
+  return (
+    typeof candidate.targetArticleKey === "string" &&
+    typeof candidate.targetArticleTitle === "string"
   );
 }

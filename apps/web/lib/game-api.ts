@@ -4,8 +4,14 @@ import {
   apiErrorSchema,
   type CountdownResult,
   countdownResultSchema,
+  type EndGameResult,
+  endGameResultSchema,
+  type GameRoutesResult,
+  gameRoutesResultSchema,
   type PairingCodeResult,
+  type PrepareNextGameResult,
   pairingCodeResultSchema,
+  prepareNextGameResultSchema,
   type ReadyResult,
   type RoomCommandResult,
   type RoomSettingsResult,
@@ -160,6 +166,51 @@ export async function startCountdown(
     },
   });
   return serverEnvelopeSchema(countdownResultSchema).parse(envelope).data;
+}
+
+export async function prepareNextGame(
+  roomId: string,
+  expectedVersion: number,
+): Promise<PrepareNextGameResult> {
+  const idempotencyKey = crypto.randomUUID();
+  const envelope = await gameApiFetch(`/v1/rooms/${roomId}/next-game`, {
+    method: "POST",
+    body: JSON.stringify({
+      schemaVersion: 1,
+      idempotencyKey,
+      roomId,
+      expectedVersion,
+    }),
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey,
+    },
+  });
+  return serverEnvelopeSchema(prepareNextGameResultSchema).parse(envelope).data;
+}
+
+export async function endGame(gameId: string): Promise<EndGameResult> {
+  const idempotencyKey = crypto.randomUUID();
+  const envelope = await gameApiFetch(`/v1/games/${gameId}/end`, {
+    method: "POST",
+    body: JSON.stringify({
+      schemaVersion: 1,
+      idempotencyKey,
+      gameId,
+    }),
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey,
+    },
+  });
+  return serverEnvelopeSchema(endGameResultSchema).parse(envelope).data;
+}
+
+export async function getGameRoutes(gameId: string): Promise<GameRoutesResult> {
+  const envelope = await gameApiFetch(`/v1/games/${gameId}/routes`, {
+    method: "GET",
+  });
+  return serverEnvelopeSchema(gameRoutesResultSchema).parse(envelope).data;
 }
 
 async function commandRequest(

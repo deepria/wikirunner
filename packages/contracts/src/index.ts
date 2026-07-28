@@ -107,6 +107,8 @@ export const redeemPairingCodeCommandSchema = commandMetaSchema.extend({
   pairingCode: pairingCodeSchema,
 });
 
+export const disconnectExtensionCommandSchema = commandMetaSchema;
+
 export const setPlayerReadyCommandSchema = commandMetaSchema.extend({
   playerId: idSchema,
   ready: z.boolean(),
@@ -115,6 +117,15 @@ export const setPlayerReadyCommandSchema = commandMetaSchema.extend({
 export const startCountdownCommandSchema = commandMetaSchema.extend({
   roomId: idSchema,
   expectedVersion: z.number().int().positive(),
+});
+
+export const prepareNextGameCommandSchema = commandMetaSchema.extend({
+  roomId: idSchema,
+  expectedVersion: z.number().int().positive(),
+});
+
+export const endGameCommandSchema = commandMetaSchema.extend({
+  gameId: idSchema,
 });
 
 export const abandonRunCommandSchema = commandMetaSchema.extend({
@@ -195,6 +206,12 @@ export const pairingResultSchema = z.object({
   pairedAt: instantSchema,
 });
 
+export const disconnectExtensionResultSchema = z.object({
+  roomId: idSchema,
+  playerId: idSchema,
+  disconnectedAt: instantSchema,
+});
+
 export const readyResultSchema = z.object({
   playerId: idSchema,
   readyAt: instantSchema.nullable(),
@@ -213,6 +230,19 @@ export const countdownResultSchema = z.object({
     roomId: idSchema,
   }),
   roomVersion: z.number().int().positive(),
+});
+
+export const prepareNextGameResultSchema = z.object({
+  roomId: idSchema,
+  status: z.literal("waiting"),
+  roomVersion: z.number().int().positive(),
+});
+
+export const endGameResultSchema = z.object({
+  gameId: idSchema,
+  gameStatus: gameStatusSchema,
+  roomStatus: roomStatusSchema,
+  endedAt: instantSchema,
 });
 
 export const runSummarySchema = z.object({
@@ -254,6 +284,27 @@ export const abandonRunResultSchema = z.object({
   roomStatus: roomStatusSchema,
 });
 
+export const navigationRouteStepSchema = z.object({
+  sequence: z.number().int().positive(),
+  eventType: navigationEventTypeSchema,
+  fromArticleKey: articleKeySchema,
+  toArticleKey: articleKeySchema,
+  countsAsMove: z.boolean(),
+  serverReceivedAt: instantSchema,
+  validationStatus: z.enum(["accepted", "accepted_with_warning"]),
+});
+
+export const gameRoutesResultSchema = z.object({
+  gameId: idSchema,
+  routes: z.array(
+    z.object({
+      runId: idSchema,
+      playerId: idSchema,
+      steps: z.array(navigationRouteStepSchema),
+    }),
+  ),
+});
+
 export const roomSnapshotSchema = z.object({
   room: roomSummarySchema.extend({
     currentGameId: idSchema.nullable(),
@@ -284,8 +335,11 @@ export type JoinRoomCommand = z.infer<typeof joinRoomCommandSchema>;
 export type UpdateRoomSettingsCommand = z.infer<typeof updateRoomSettingsCommandSchema>;
 export type IssuePairingCodeCommand = z.infer<typeof issuePairingCodeCommandSchema>;
 export type RedeemPairingCodeCommand = z.infer<typeof redeemPairingCodeCommandSchema>;
+export type DisconnectExtensionCommand = z.infer<typeof disconnectExtensionCommandSchema>;
 export type SetPlayerReadyCommand = z.infer<typeof setPlayerReadyCommandSchema>;
 export type StartCountdownCommand = z.infer<typeof startCountdownCommandSchema>;
+export type PrepareNextGameCommand = z.infer<typeof prepareNextGameCommandSchema>;
+export type EndGameCommand = z.infer<typeof endGameCommandSchema>;
 export type AbandonRunCommand = z.infer<typeof abandonRunCommandSchema>;
 export type NavigationEvent = z.infer<typeof navigationEventSchema>;
 export type SubmitNavigationEventsCommand = z.infer<typeof submitNavigationEventsCommandSchema>;
@@ -296,13 +350,18 @@ export type RoomCommandResult = z.infer<typeof roomCommandResultSchema>;
 export type RoomSettingsResult = z.infer<typeof roomSettingsResultSchema>;
 export type PairingCodeResult = z.infer<typeof pairingCodeResultSchema>;
 export type PairingResult = z.infer<typeof pairingResultSchema>;
+export type DisconnectExtensionResult = z.infer<typeof disconnectExtensionResultSchema>;
 export type ReadyResult = z.infer<typeof readyResultSchema>;
 export type GameSummary = z.infer<typeof gameSummarySchema>;
 export type CountdownResult = z.infer<typeof countdownResultSchema>;
+export type PrepareNextGameResult = z.infer<typeof prepareNextGameResultSchema>;
+export type EndGameResult = z.infer<typeof endGameResultSchema>;
 export type RunSummary = z.infer<typeof runSummarySchema>;
 export type NavigationEventAck = z.infer<typeof navigationEventAckSchema>;
 export type SubmitNavigationEventsResult = z.infer<typeof submitNavigationEventsResultSchema>;
 export type AbandonRunResult = z.infer<typeof abandonRunResultSchema>;
+export type NavigationRouteStep = z.infer<typeof navigationRouteStepSchema>;
+export type GameRoutesResult = z.infer<typeof gameRoutesResultSchema>;
 export type RoomSnapshot = z.infer<typeof roomSnapshotSchema>;
 
 export function canonicalNavigationEventHashInput(

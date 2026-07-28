@@ -3,10 +3,12 @@
 import type { RoomSnapshot } from "@wikirunner/contracts";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { CopyButton } from "../../../components/copy-button";
 import { CountdownClock } from "../../../components/countdown-clock";
+import { Leaderboard } from "../../../components/leaderboard";
 import { PlayerControls } from "../../../components/player-controls";
 import { RoomSettingsForm } from "../../../components/room-settings-form";
-import { getRoomSnapshot, startCountdown } from "../../../lib/game-api";
+import { endGame, getRoomSnapshot, prepareNextGame, startCountdown } from "../../../lib/game-api";
 
 export default function RoomPage() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -15,6 +17,8 @@ export default function RoomPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [actionError, setActionError] = useState<string>();
   const [isStarting, setIsStarting] = useState(false);
+  const [isEnding, setIsEnding] = useState(false);
+  const [isPreparingNextGame, setIsPreparingNextGame] = useState(false);
 
   const loadSnapshot = useCallback(async () => {
     setIsLoading(true);
@@ -43,7 +47,7 @@ export default function RoomPage() {
     return () => window.clearInterval(interval);
   }, [roomId]);
 
-  if (isLoading) {
+  if (isLoading && !snapshot) {
     return (
       <main className="lobby-page">
         <p className="eyebrow">LOADING ROOM</p>
@@ -52,7 +56,7 @@ export default function RoomPage() {
     );
   }
 
-  if (error || !snapshot) {
+  if (!snapshot) {
     return (
       <main className="lobby-page">
         <p className="eyebrow">ROOM ERROR</p>
@@ -94,6 +98,49 @@ export default function RoomPage() {
     }
   }
 
+  async function handleEndGame() {
+    if (!snapshot?.game) {
+      return;
+    }
+    if (!window.confirm("현재 경기를 종료할까요? 진행 중인 참가자의 기록은 종료됩니다.")) {
+      return;
+    }
+
+    setActionError(undefined);
+    setIsEnding(true);
+    try {
+      await endGame(snapshot.game.id);
+      await loadSnapshot();
+    } catch (endError) {
+      setActionError(
+        endError instanceof Error ? endError.message : "현재 경기를 종료하지 못했습니다.",
+      );
+    } finally {
+      setIsEnding(false);
+    }
+  }
+
+  async function handlePrepareNextGame() {
+    if (!snapshot) {
+      return;
+    }
+
+    setActionError(undefined);
+    setIsPreparingNextGame(true);
+    try {
+      await prepareNextGame(snapshot.room.id, snapshot.room.version);
+      await loadSnapshot();
+    } catch (prepareError) {
+      setActionError(
+        prepareError instanceof Error
+          ? prepareError.message
+          : "다음 경기 준비 상태로 전환하지 못했습니다.",
+      );
+    } finally {
+      setIsPreparingNextGame(false);
+    }
+  }
+
   return (
     <main className="lobby-page">
       <nav aria-label="대기실 메뉴">
@@ -106,7 +153,10 @@ export default function RoomPage() {
       <header className="lobby-header">
         <div>
           <p className="eyebrow">ROOM CODE</p>
-          <h1>{snapshot.room.inviteCode}</h1>
+          <div className="room-code-value">
+            <h1>{snapshot.room.inviteCode}</h1>
+            <CopyButton label="방 코드" value={snapshot.room.inviteCode} />
+          </div>
           <p>이 코드를 함께 플레이할 사람에게 공유하세요.</p>
         </div>
         <span className="room-state">{snapshot.room.status}</span>
@@ -114,6 +164,31 @@ export default function RoomPage() {
 
       {snapshot.game?.status === "countdown" ? (
         <CountdownClock scheduledAt={snapshot.game.scheduledAt} />
+      ) : null}
+
+      {isCurrentPlayerHost &&
+      snapshot.game &&
+      (snapshot.game.status === "countdown" || snapshot.game.status === "running") ? (
+        <section className="start-panel">
+          <div>
+            <p className="eyebrow">HOST CONTROL</p>
+            <h2>현재 경기 관리</h2>
+            <p>경기를 종료하면 아직 달리고 있는 참가자도 함께 종료 처리됩니다.</p>
+          </div>
+          <button
+            className="danger-button"
+            disabled={isEnding}
+            type="button"
+            onClick={handleEndGame}
+          >
+            {isEnding ? "경기 종료 중…" : "현재 경기 종료"}
+          </button>
+          {actionError ? (
+            <p className="form-error" role="alert">
+              {actionError}
+            </p>
+          ) : null}
+        </section>
       ) : null}
 
       {currentPlayer ? (
@@ -176,29 +251,8 @@ export default function RoomPage() {
         </article>
       </section>
 
-      {snapshot.runs.length > 0 ? (
-        <section className="leaderboard-panel">
-          <div className="card-heading">
-            <div>
-              <p className="eyebrow">LIVE RESULT</p>
-              <h2>실시간 경기 현황</h2>
-            </div>
-            <span>{snapshot.game?.targetArticle.title} 도착 순</span>
-          </div>
-          <ol className="leaderboard-list">
-            {snapshot.runs.map((run) => (
-              <li key={run.id}>
-                <strong>{run.rank ? `${run.rank}위` : "진행 중"}</strong>
-                <span>{run.nickname}</span>
-                <span>
-                  {run.moveCount === null ? `${run.lastSequence}개 기록` : `${run.moveCount}회`}
-                </span>
-                <span>{run.durationMs === null ? run.status : formatDuration(run.durationMs)}</span>
-                {run.violationStatus === "warned" ? <small>경고 확인 필요</small> : null}
-              </li>
-            ))}
-          </ol>
-        </section>
+      {snapshot.game && snapshot.runs.length > 0 ? (
+        <Leaderboard key={snapshot.game.id} game={snapshot.game} runs={snapshot.runs} />
       ) : null}
 
       {isCurrentPlayerHost && snapshot.room.status === "waiting" ? (
@@ -218,15 +272,26 @@ export default function RoomPage() {
           ) : null}
         </section>
       ) : null}
+
+      {isCurrentPlayerHost && snapshot.room.status === "finished" ? (
+        <section className="start-panel next-game-panel">
+          <div>
+            <p className="eyebrow">NEXT ROUND</p>
+            <h2>같은 방에서 다음 경기</h2>
+            <p>
+              참가자 연결은 유지하고 준비 상태만 초기화합니다. 문서 설정도 다시 바꿀 수 있습니다.
+            </p>
+          </div>
+          <button disabled={isPreparingNextGame} type="button" onClick={handlePrepareNextGame}>
+            {isPreparingNextGame ? "준비 상태로 전환 중…" : "다음 경기 준비"}
+          </button>
+          {actionError ? (
+            <p className="form-error" role="alert">
+              {actionError}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
     </main>
   );
-}
-
-function formatDuration(durationMs: number): string {
-  const minutes = Math.floor(durationMs / 60_000);
-  const seconds = Math.floor((durationMs % 60_000) / 1000);
-  const hundredths = Math.floor((durationMs % 1000) / 10);
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(
-    hundredths,
-  ).padStart(2, "0")}`;
 }

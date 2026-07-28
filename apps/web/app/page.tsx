@@ -12,11 +12,7 @@ export default function Home() {
 
       <section className="hero">
         <p className="eyebrow">WIKI LINK SPEEDRUN</p>
-        <h1>
-          검색 없이,
-          <br />
-          링크만 따라 달리세요.
-        </h1>
+        <h1>링크만 따라 달리세요.</h1>
         <p className="summary">
           같은 문서에서 출발해 나무위키 내부 링크만으로 목표 문서에 먼저 도착하는 실시간
           스피드런입니다.

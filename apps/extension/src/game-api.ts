@@ -2,6 +2,8 @@ import {
   type AbandonRunResult,
   abandonRunResultSchema,
   apiErrorSchema,
+  type DisconnectExtensionResult,
+  disconnectExtensionResultSchema,
   type NavigationEvent,
   type PairingResult,
   pairingResultSchema,
@@ -28,6 +30,22 @@ export async function pairExtension(pairingCode: string): Promise<PairingResult>
     },
   });
   return serverEnvelopeSchema(pairingResultSchema).parse(envelope).data;
+}
+
+export async function disconnectExtension(): Promise<DisconnectExtensionResult> {
+  const idempotencyKey = crypto.randomUUID();
+  const envelope = await apiFetch("/v1/extension/disconnect", {
+    method: "POST",
+    body: JSON.stringify({
+      schemaVersion: 1,
+      idempotencyKey,
+    }),
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey,
+    },
+  });
+  return serverEnvelopeSchema(disconnectExtensionResultSchema).parse(envelope).data;
 }
 
 export async function getExtensionSnapshot(roomId: string): Promise<RoomSnapshot> {

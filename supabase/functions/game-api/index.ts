@@ -61,6 +61,8 @@ const redeemPairingCodeSchema = commandSchema.extend({
     .pipe(z.string().length(8)),
 });
 
+const disconnectExtensionSchema = commandSchema;
+
 const setReadySchema = commandSchema.extend({
   playerId: z.string().uuid(),
   ready: z.boolean(),
@@ -69,6 +71,15 @@ const setReadySchema = commandSchema.extend({
 const startCountdownSchema = commandSchema.extend({
   roomId: z.string().uuid(),
   expectedVersion: z.number().int().positive(),
+});
+
+const prepareNextGameSchema = commandSchema.extend({
+  roomId: z.string().uuid(),
+  expectedVersion: z.number().int().positive(),
+});
+
+const endGameSchema = commandSchema.extend({
+  gameId: z.string().uuid(),
 });
 
 const navigationEventSchema = z.object({
@@ -105,6 +116,7 @@ type ApiErrorCode =
   | "IDEMPOTENCY_KEY_REQUIRED"
   | "IDEMPOTENCY_KEY_REUSED"
   | "ROOM_NOT_FOUND"
+  | "GAME_NOT_FOUND"
   | "ROOM_NOT_JOINABLE"
   | "ROOM_NOT_CONFIGURABLE"
   | "ROOM_FULL"
@@ -117,8 +129,12 @@ type ApiErrorCode =
   | "PAIRING_CODE_EXPIRED"
   | "PAIRING_CODE_USED"
   | "EXTENSION_REQUIRED"
+  | "EXTENSION_NOT_CONNECTED"
+  | "EXTENSION_DISCONNECT_NOT_ALLOWED"
   | "ROOM_NOT_READYABLE"
   | "ROOM_NOT_STARTABLE"
+  | "NEXT_GAME_NOT_AVAILABLE"
+  | "GAME_NOT_ACTIVE"
   | "ROOM_SETTINGS_REQUIRED"
   | "PLAYERS_NOT_READY"
   | "RUN_ACCESS_DENIED"
@@ -180,6 +196,27 @@ interface RunRow {
   violation_status: "clear" | "warned" | "reviewed";
 }
 
+interface GameAccessRow {
+  id: string;
+  room_id: string;
+}
+
+interface RouteRunRow {
+  id: string;
+  player_id: string;
+}
+
+interface NavigationEventRow {
+  run_id: string;
+  sequence: number;
+  event_type: "link" | "back" | "forward" | "reload" | "direct" | "tab_resume";
+  from_article_key: string;
+  to_article_key: string;
+  counts_as_move: boolean;
+  server_received_at: string;
+  validation_status: "accepted" | "accepted_with_warning";
+}
+
 Deno.serve(async (request) => {
   const requestId = crypto.randomUUID();
   const startedAt = performance.now();
@@ -217,16 +254,24 @@ Deno.serve(async (request) => {
       response = await issuePairingCode(request, path, user.id, supabase, requestId);
     } else if (request.method === "POST" && path === "/v1/extension/pair") {
       response = await redeemPairingCode(request, supabase, requestId);
+    } else if (request.method === "POST" && path === "/v1/extension/disconnect") {
+      response = await disconnectExtension(request, supabase, requestId);
     } else if (request.method === "PUT" && path.match(/^\/v1\/players\/[^/]+\/ready$/)) {
       response = await setPlayerReady(request, path, supabase, requestId);
     } else if (request.method === "POST" && path.match(/^\/v1\/rooms\/[^/]+\/countdown$/)) {
       response = await startCountdown(request, path, supabase, requestId);
+    } else if (request.method === "POST" && path.match(/^\/v1\/rooms\/[^/]+\/next-game$/)) {
+      response = await prepareNextGame(request, path, supabase, requestId);
+    } else if (request.method === "POST" && path.match(/^\/v1\/games\/[^/]+\/end$/)) {
+      response = await endGame(request, path, supabase, requestId);
     } else if (request.method === "POST" && path.match(/^\/v1\/games\/[^/]+\/events$/)) {
       response = await submitNavigationEvents(request, path, supabase, requestId);
     } else if (request.method === "POST" && path.match(/^\/v1\/games\/[^/]+\/abandon$/)) {
       response = await abandonRun(request, path, supabase, requestId);
     } else if (request.method === "GET" && path.match(/^\/v1\/rooms\/[^/]+\/snapshot$/)) {
       response = await getRoomSnapshot(path, supabase, requestId);
+    } else if (request.method === "GET" && path.match(/^\/v1\/games\/[^/]+\/routes$/)) {
+      response = await getGameRoutes(path, supabase, requestId);
     } else {
       response = errorResponse(
         "METHOD_NOT_ALLOWED",
@@ -355,6 +400,27 @@ async function redeemPairingCode(
   return successResponse(data);
 }
 
+async function disconnectExtension(
+  request: Request,
+  supabase: SupabaseClient,
+  requestId: string,
+): Promise<Response> {
+  const input = await parseCommand(request, disconnectExtensionSchema, requestId);
+  if (input instanceof Response) {
+    return input;
+  }
+
+  const { data, error } = await supabase.rpc("disconnect_extension", {
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+  if (error) {
+    return databaseErrorResponse(error, requestId);
+  }
+
+  return successResponse(data);
+}
+
 async function setPlayerReady(
   request: Request,
   path: string,
@@ -427,6 +493,79 @@ async function startCountdown(
   }
 
   return successResponse(data, 201);
+}
+
+async function prepareNextGame(
+  request: Request,
+  path: string,
+  supabase: SupabaseClient,
+  requestId: string,
+): Promise<Response> {
+  const pathRoomId = path.split("/")[3];
+  if (!pathRoomId || !roomIdPattern.test(pathRoomId)) {
+    return errorResponse("INVALID_REQUEST", "올바르지 않은 방 ID입니다.", requestId, 400);
+  }
+
+  const input = await parseCommand(request, prepareNextGameSchema, requestId);
+  if (input instanceof Response) {
+    return input;
+  }
+  if (input.roomId !== pathRoomId) {
+    return errorResponse(
+      "INVALID_REQUEST",
+      "요청 경로와 본문의 방 ID가 일치하지 않습니다.",
+      requestId,
+      400,
+    );
+  }
+
+  const { data, error } = await supabase.rpc("prepare_next_game", {
+    p_room_id: input.roomId,
+    p_expected_version: input.expectedVersion,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+  if (error) {
+    return databaseErrorResponse(error, requestId);
+  }
+
+  return successResponse(data);
+}
+
+async function endGame(
+  request: Request,
+  path: string,
+  supabase: SupabaseClient,
+  requestId: string,
+): Promise<Response> {
+  const pathGameId = path.split("/")[3];
+  if (!pathGameId || !roomIdPattern.test(pathGameId)) {
+    return errorResponse("INVALID_REQUEST", "올바르지 않은 경기 ID입니다.", requestId, 400);
+  }
+
+  const input = await parseCommand(request, endGameSchema, requestId);
+  if (input instanceof Response) {
+    return input;
+  }
+  if (input.gameId !== pathGameId) {
+    return errorResponse(
+      "INVALID_REQUEST",
+      "요청 경로와 본문의 경기 ID가 일치하지 않습니다.",
+      requestId,
+      400,
+    );
+  }
+
+  const { data, error } = await supabase.rpc("end_game", {
+    p_game_id: input.gameId,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+  if (error) {
+    return databaseErrorResponse(error, requestId);
+  }
+
+  return successResponse(data);
 }
 
 async function submitNavigationEvents(
@@ -764,13 +903,90 @@ async function getRoomSnapshot(
       nickname: playersById.get(run.player_id)?.nickname ?? "알 수 없음",
       status: run.status,
       durationMs: run.duration_ms,
-      moveCount: run.move_count,
+      moveCount: run.move_count ?? 0,
       rank: run.rank,
       lastSequence: run.last_sequence,
       lastArticleKey: run.last_article_key,
       lastEventHash: run.player_id === ownPlayerId ? run.last_event_hash : null,
       violationStatus: run.violation_status,
       isCurrentPlayer: run.player_id === ownPlayerId,
+    })),
+  });
+}
+
+async function getGameRoutes(
+  path: string,
+  supabase: SupabaseClient,
+  requestId: string,
+): Promise<Response> {
+  const gameId = path.split("/")[3];
+  if (!gameId || !roomIdPattern.test(gameId)) {
+    return errorResponse("INVALID_REQUEST", "올바르지 않은 경기 ID입니다.", requestId, 400);
+  }
+
+  const gameResult = await supabase
+    .from("games")
+    .select("id,room_id")
+    .eq("id", gameId)
+    .maybeSingle<GameAccessRow>();
+
+  if (gameResult.error) {
+    return databaseErrorResponse(gameResult.error, requestId);
+  }
+  if (!gameResult.data) {
+    return errorResponse("GAME_NOT_FOUND", "경기를 찾을 수 없습니다.", requestId, 404);
+  }
+
+  const runsResult = await supabase
+    .from("runs")
+    .select("id,player_id")
+    .eq("game_id", gameId)
+    .order("id", { ascending: true })
+    .returns<RouteRunRow[]>();
+
+  if (runsResult.error) {
+    return databaseErrorResponse(runsResult.error, requestId);
+  }
+
+  const runs = runsResult.data ?? [];
+  const runIds = runs.map((run) => run.id);
+  const eventsResult =
+    runIds.length > 0
+      ? await supabase
+          .from("navigation_events")
+          .select(
+            "run_id,sequence,event_type,from_article_key,to_article_key,counts_as_move,server_received_at,validation_status",
+          )
+          .in("run_id", runIds)
+          .order("sequence", { ascending: true })
+          .returns<NavigationEventRow[]>()
+      : { data: [] as NavigationEventRow[], error: null };
+
+  if (eventsResult.error) {
+    return databaseErrorResponse(eventsResult.error, requestId);
+  }
+
+  const eventsByRun = new Map<string, NavigationEventRow[]>();
+  for (const event of eventsResult.data ?? []) {
+    const runEvents = eventsByRun.get(event.run_id) ?? [];
+    runEvents.push(event);
+    eventsByRun.set(event.run_id, runEvents);
+  }
+
+  return successResponse({
+    gameId,
+    routes: runs.map((run) => ({
+      runId: run.id,
+      playerId: run.player_id,
+      steps: (eventsByRun.get(run.id) ?? []).map((event) => ({
+        sequence: event.sequence,
+        eventType: event.event_type,
+        fromArticleKey: event.from_article_key,
+        toArticleKey: event.to_article_key,
+        countsAsMove: event.counts_as_move,
+        serverReceivedAt: event.server_received_at,
+        validationStatus: event.validation_status,
+      })),
     })),
   });
 }
@@ -907,6 +1123,11 @@ function databaseErrorResponse(
       message: "방을 찾을 수 없습니다.",
       status: 404,
     },
+    GAME_NOT_FOUND: {
+      code: "GAME_NOT_FOUND",
+      message: "경기를 찾을 수 없습니다.",
+      status: 404,
+    },
     ROOM_NOT_JOINABLE: {
       code: "ROOM_NOT_JOINABLE",
       message: "현재 입장할 수 없는 방입니다.",
@@ -962,6 +1183,16 @@ function databaseErrorResponse(
       message: "확장 프로그램을 연결한 뒤 준비할 수 있습니다.",
       status: 409,
     },
+    EXTENSION_NOT_CONNECTED: {
+      code: "EXTENSION_NOT_CONNECTED",
+      message: "현재 연결된 확장 프로그램이 없습니다.",
+      status: 409,
+    },
+    EXTENSION_DISCONNECT_NOT_ALLOWED: {
+      code: "EXTENSION_DISCONNECT_NOT_ALLOWED",
+      message: "경기가 시작된 뒤에는 연동을 해제할 수 없습니다.",
+      status: 409,
+    },
     ROOM_NOT_READYABLE: {
       code: "ROOM_NOT_READYABLE",
       message: "현재 준비 상태를 변경할 수 없습니다.",
@@ -970,6 +1201,16 @@ function databaseErrorResponse(
     ROOM_NOT_STARTABLE: {
       code: "ROOM_NOT_STARTABLE",
       message: "현재 카운트다운을 시작할 수 없습니다.",
+      status: 409,
+    },
+    NEXT_GAME_NOT_AVAILABLE: {
+      code: "NEXT_GAME_NOT_AVAILABLE",
+      message: "종료된 경기에서만 다음 경기를 준비할 수 있습니다.",
+      status: 409,
+    },
+    GAME_NOT_ACTIVE: {
+      code: "GAME_NOT_ACTIVE",
+      message: "현재 진행 중인 경기가 아닙니다.",
       status: 409,
     },
     ROOM_SETTINGS_REQUIRED: {

@@ -3,7 +3,11 @@ import {
   abandonRunResultSchema,
   canonicalNavigationEventHashInput,
   createRoomCommandSchema,
+  disconnectExtensionResultSchema,
+  endGameResultSchema,
+  gameRoutesResultSchema,
   pairingCodeSchema,
+  prepareNextGameResultSchema,
   roomCodeSchema,
   serverEnvelopeSchema,
   updateRoomSettingsCommandSchema,
@@ -94,6 +98,59 @@ describe("extension protocol", () => {
         abandonedAt: "2026-07-27T07:02:03.000Z",
         gameStatus: "cancelled",
         roomStatus: "finished",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts an extension disconnect result", () => {
+    expect(
+      disconnectExtensionResultSchema.safeParse({
+        roomId: "019fa265-5f23-7260-9a6d-2978554d7153",
+        playerId: "019fa265-5f23-7260-9a6d-2978554d7154",
+        disconnectedAt: "2026-07-28T07:02:03.000Z",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts game lifecycle results", () => {
+    expect(
+      prepareNextGameResultSchema.safeParse({
+        roomId: "019fa265-5f23-7260-9a6d-2978554d7153",
+        status: "waiting",
+        roomVersion: 4,
+      }).success,
+    ).toBe(true);
+    expect(
+      endGameResultSchema.safeParse({
+        gameId: "019fa265-5f23-7260-9a6d-2978554d7154",
+        gameStatus: "finished",
+        roomStatus: "finished",
+        endedAt: "2026-07-28T08:02:03.000Z",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts player navigation routes", () => {
+    expect(
+      gameRoutesResultSchema.safeParse({
+        gameId: "019fa265-5f23-7260-9a6d-2978554d7154",
+        routes: [
+          {
+            runId: "019fa265-5f23-7260-9a6d-2978554d7155",
+            playerId: "019fa265-5f23-7260-9a6d-2978554d7156",
+            steps: [
+              {
+                sequence: 1,
+                eventType: "link",
+                fromArticleKey: "출발",
+                toArticleKey: "중간",
+                countsAsMove: true,
+                serverReceivedAt: "2026-07-28T08:02:03.000Z",
+                validationStatus: "accepted",
+              },
+            ],
+          },
+        ],
       }).success,
     ).toBe(true);
   });

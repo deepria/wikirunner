@@ -3,6 +3,7 @@
 import type { RoomSnapshot } from "@wikirunner/contracts";
 import { useState } from "react";
 import { issuePairingCode, setPlayerReady } from "../lib/game-api";
+import { CopyButton } from "./copy-button";
 
 type SnapshotPlayer = RoomSnapshot["players"][number];
 
@@ -72,9 +73,15 @@ export function PlayerControls({ player, roomStatus, onChanged }: PlayerControls
           <p>아래 코드를 WikiRunner 확장 프로그램 팝업에 입력하세요.</p>
           {pairingCode ? (
             <>
-              <strong className="pairing-code">
-                {pairingCode.slice(0, 4)}-{pairingCode.slice(4)}
-              </strong>
+              <div className="pairing-code-value">
+                <strong className="pairing-code">
+                  {pairingCode.slice(0, 4)}-{pairingCode.slice(4)}
+                </strong>
+                <CopyButton
+                  label="연동 코드"
+                  value={`${pairingCode.slice(0, 4)}-${pairingCode.slice(4)}`}
+                />
+              </div>
               <small>
                 {expiresAt
                   ? `${new Date(expiresAt).toLocaleTimeString("ko-KR")}까지 유효`

@@ -42,6 +42,20 @@
         padding-top: 16px;
         border-top: 1px solid #c9c8bf;
       }
+      .connection-controls {
+        display: grid;
+        gap: 8px;
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid #c9c8bf;
+      }
+      .web-controls {
+        display: grid;
+        gap: 8px;
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid #c9c8bf;
+      }
       label {
         display: grid;
         gap: 6px;
@@ -78,6 +92,9 @@
         color: #fff;
         background: #a32314;
       }
+      .secondary {
+        background: transparent;
+      }
       .error {
         color: #a32314;
         font-size: 12px;
@@ -109,6 +126,15 @@
     <section class="game-controls" id="game-controls" hidden>
       <button class="danger" id="abandon-button" type="button">이번 경기 포기</button>
       <p class="error" id="abandon-error" role="alert"></p>
+    </section>
+    <section class="connection-controls" id="connection-controls" hidden>
+      <button class="secondary" id="disconnect-button" type="button">연동 해제</button>
+      <p class="error" id="disconnect-error" role="alert"></p>
+    </section>
+    <section class="web-controls" id="web-controls">
+      <button class="secondary" id="open-home-button" type="button">웹 메인으로 이동</button>
+      <button class="secondary" id="open-room-button" type="button">현재 방으로 이동</button>
+      <p class="error" id="web-navigation-error" role="alert"></p>
     </section>
     <script type="module" src="/src/popup.ts"></script>
   </body>

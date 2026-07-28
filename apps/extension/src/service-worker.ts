@@ -7,13 +7,18 @@ import {
   type RunSummary,
 } from "@wikirunner/contracts";
 import { normalizeNamuWikiUrl } from "@wikirunner/namuwiki";
-import { getExtensionSnapshot, submitNavigationEvent } from "./game-api";
+import { disconnectExtension, getExtensionSnapshot, submitNavigationEvent } from "./game-api";
 import { ensureExtensionSession, getExtensionSupabaseClient } from "./supabase";
 
 const GAME_START_ALARM = "wikirunner-game-start";
 const OUTBOX_RETRY_ALARM = "wikirunner-outbox-retry";
 const LINK_INTENT_MAX_AGE_MS = 15_000;
+const LINK_INTENT_GRACE_MS = 250;
+const CONTENT_NAVIGATION_GRACE_MS = 350;
 let roomChannel: RealtimeChannel | undefined;
+let subscribedRoomId: string | undefined;
+let pendingRoomSubscription: { roomId: string; promise: Promise<void> } | undefined;
+let roomSubscriptionQueue = Promise.resolve();
 let navigationPipeline = Promise.resolve();
 let isFlushingOutbox = false;
 const recentNavigationSignals = new Map<number, { articleKey: string; observedAt: number }>();
@@ -43,6 +48,18 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     return true;
   }
 
+  if (isDisconnectExtensionMessage(message)) {
+    void disconnectPairing()
+      .then(() => sendResponse({ ok: true }))
+      .catch((error: unknown) =>
+        sendResponse({
+          ok: false,
+          message: error instanceof Error ? error.message : "연동 해제 실패",
+        }),
+      );
+    return true;
+  }
+
   if (isLinkIntentMessage(message) && sender.tab?.id !== undefined && sender.frameId === 0) {
     void rememberLinkIntent(message, sender.tab.id);
   }
@@ -54,8 +71,10 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     enqueueNavigationSignal({
       tabId: sender.tab.id,
       articleKey: message.articleKey,
+      fromArticleKey: message.fromArticleKey,
       transitionType: "link",
       transitionQualifiers: [],
+      source: "content",
     });
   }
   if (isRunTerminatedMessage(message)) {
@@ -94,15 +113,34 @@ function enqueueWebNavigation(
   if (!article.ok) {
     return;
   }
+  const fromArticleKey = fromArticleKeyFromUrl(details.url);
   enqueueNavigationSignal({
     tabId: details.tabId,
     articleKey: article.articleKey,
+    ...(fromArticleKey ? { fromArticleKey } : {}),
     transitionType: details.transitionType,
     transitionQualifiers: details.transitionQualifiers,
+    source: "browser",
   });
 }
 
+function fromArticleKeyFromUrl(urlValue: string): string | undefined {
+  try {
+    const fromArticleKey = new URL(urlValue).searchParams.get("from")?.normalize("NFC");
+    return fromArticleKey && !/[\p{C}]/u.test(fromArticleKey) ? fromArticleKey : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function enqueueNavigationSignal(signal: NavigationSignal): void {
+  if (signal.source === "content") {
+    setTimeout(() => {
+      enqueueNavigationSignal({ ...signal, source: "content_delayed" });
+    }, CONTENT_NAVIGATION_GRACE_MS);
+    return;
+  }
+
   const observedAt = Date.now();
   const recentSignal = recentNavigationSignals.get(signal.tabId);
   if (
@@ -135,16 +173,43 @@ async function restoreConnection(): Promise<void> {
   }
 }
 
-async function subscribeToRoom(roomId: string): Promise<void> {
+function subscribeToRoom(roomId: string): Promise<void> {
+  if (roomChannel && subscribedRoomId === roomId) {
+    return Promise.resolve();
+  }
+  if (pendingRoomSubscription?.roomId === roomId) {
+    return pendingRoomSubscription.promise;
+  }
+
+  const subscription = roomSubscriptionQueue.then(() => establishRoomSubscription(roomId));
+  roomSubscriptionQueue = subscription.catch(() => undefined);
+  pendingRoomSubscription = { roomId, promise: subscription };
+  void subscription
+    .finally(() => {
+      if (pendingRoomSubscription?.promise === subscription) {
+        pendingRoomSubscription = undefined;
+      }
+    })
+    .catch(() => undefined);
+  return subscription;
+}
+
+async function establishRoomSubscription(roomId: string): Promise<void> {
+  if (roomChannel && subscribedRoomId === roomId) {
+    return;
+  }
+
   await ensureExtensionSession();
   const supabase = getExtensionSupabaseClient();
 
   if (roomChannel) {
     await supabase.removeChannel(roomChannel);
+    roomChannel = undefined;
+    subscribedRoomId = undefined;
   }
 
   await refreshRoom(roomId);
-  roomChannel = supabase
+  const channel = supabase
     .channel(`extension-room:${roomId}`)
     .on(
       "postgres_changes",
@@ -159,6 +224,43 @@ async function subscribeToRoom(roomId: string): Promise<void> {
       },
     )
     .subscribe();
+  roomChannel = channel;
+  subscribedRoomId = roomId;
+}
+
+async function disconnectPairing(): Promise<void> {
+  await disconnectExtension();
+
+  if (roomChannel) {
+    await getExtensionSupabaseClient()
+      .removeChannel(roomChannel)
+      .catch(() => undefined);
+    roomChannel = undefined;
+    subscribedRoomId = undefined;
+  }
+
+  await chrome.alarms.clear(GAME_START_ALARM);
+  await chrome.alarms.clear(OUTBOX_RETRY_ALARM);
+  await chrome.storage.session.remove("pendingLinkIntent");
+  await chrome.storage.local.remove([
+    "activeRoomId",
+    "activePlayerId",
+    "pairedAt",
+    "lastRoomSnapshotAt",
+    "roomStatus",
+    "leaderboard",
+    "lastGameOutcome",
+    "lastFinalizedGameId",
+    "activeGame",
+    "activeRun",
+    "gameTabId",
+    "gameOpenedAt",
+    "lastEventError",
+    "lastCompletedGame",
+    "navigationOutbox",
+    "lastObservedNavigation",
+  ]);
+  recentNavigationSignals.clear();
 }
 
 async function refreshRoom(roomId: string): Promise<void> {
@@ -175,6 +277,23 @@ async function synchronizeGame(snapshot: RoomSnapshot): Promise<void> {
   const game = snapshot.game;
   const ownRun = snapshot.runs.find((run) => run.isCurrentPlayer);
   if (!game || !ownRun) {
+    if (snapshot.room.status === "waiting") {
+      const { activeGame } = await chrome.storage.local.get(["activeGame"]);
+      if (isActiveGame(activeGame)) {
+        await resetActiveGame("abandoned", new Date().toISOString(), activeGame.gameId);
+      } else {
+        await chrome.storage.local.set({
+          lastGameOutcome: null,
+          lastCompletedGame: null,
+          lastFinalizedGameId: null,
+        });
+      }
+    }
+    return;
+  }
+
+  const { lastFinalizedGameId } = await chrome.storage.local.get(["lastFinalizedGameId"]);
+  if (lastFinalizedGameId === game.id) {
     return;
   }
 
@@ -190,6 +309,13 @@ async function synchronizeGame(snapshot: RoomSnapshot): Promise<void> {
   };
   const activeRun = await overlayPendingEvents(toActiveRun(ownRun), ownRun.id);
 
+  const { lastFinalizedGameId: currentFinalizedGameId } = await chrome.storage.local.get([
+    "lastFinalizedGameId",
+  ]);
+  if (currentFinalizedGameId === game.id) {
+    return;
+  }
+
   if (
     game.status === "finished" ||
     ownRun.status === "finished" ||
@@ -204,7 +330,13 @@ async function synchronizeGame(snapshot: RoomSnapshot): Promise<void> {
     return;
   }
 
-  await chrome.storage.local.set({ activeGame, activeRun, lastGameOutcome: null });
+  await chrome.storage.local.set({
+    activeGame,
+    activeRun,
+    lastGameOutcome: null,
+    lastCompletedGame: null,
+    lastFinalizedGameId: null,
+  });
 
   const scheduledTime = new Date(activeGame.scheduledAt).getTime();
   if (scheduledTime <= Date.now()) {
@@ -284,11 +416,25 @@ async function observeNavigation(signal: NavigationSignal): Promise<void> {
   }
 
   const { pendingLinkIntent } = await chrome.storage.session.get(["pendingLinkIntent"]);
-  const intent = isPendingLinkIntent(pendingLinkIntent) ? pendingLinkIntent : undefined;
+  let intent = isPendingLinkIntent(pendingLinkIntent) ? pendingLinkIntent : undefined;
+  if (
+    signal.transitionType === "link" &&
+    !isMatchingLinkNavigation(intent, signal, activeRun, activeGame)
+  ) {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, LINK_INTENT_GRACE_MS);
+    });
+    const { pendingLinkIntent: delayedPendingLinkIntent } = await chrome.storage.session.get([
+      "pendingLinkIntent",
+    ]);
+    intent = isPendingLinkIntent(delayedPendingLinkIntent) ? delayedPendingLinkIntent : undefined;
+  }
   const now = new Date().toISOString();
-  const eventType = classifyNavigation(signal, activeRun, activeGame, intent);
+  const matchedIntent =
+    intent && isMatchingLinkNavigation(intent, signal, activeRun, activeGame) ? intent : undefined;
+  const eventType = classifyNavigation(signal, activeRun, activeGame, matchedIntent);
   const clientObservedAt =
-    eventType === "link" && intent ? new Date(intent.observedAt).toISOString() : now;
+    eventType === "link" && matchedIntent ? new Date(matchedIntent.observedAt).toISOString() : now;
   const event: NavigationEvent = {
     schemaVersion: 1,
     clientEventId: crypto.randomUUID(),
@@ -334,18 +480,10 @@ function classifyNavigation(
   activeGame: ActiveGame,
   intent: PendingLinkIntent | undefined,
 ): NavigationEventType {
-  const intentAge = intent
-    ? Date.now() - new Date(intent.observedAt).getTime()
-    : Number.POSITIVE_INFINITY;
-  if (
-    intent &&
-    intent.gameId === activeGame.gameId &&
-    intent.tabId === signal.tabId &&
-    intent.fromArticleKey === activeRun.lastArticleKey &&
-    intent.toArticleKey === signal.articleKey &&
-    intentAge >= 0 &&
-    intentAge <= LINK_INTENT_MAX_AGE_MS
-  ) {
+  if (isMatchingLinkNavigation(intent, signal, activeRun, activeGame)) {
+    return "link";
+  }
+  if (signal.transitionType === "link" && signal.fromArticleKey === activeRun.lastArticleKey) {
     return "link";
   }
   if (signal.articleKey === activeRun.lastArticleKey || signal.transitionType === "reload") {
@@ -355,6 +493,59 @@ function classifyNavigation(
     return "back";
   }
   return "direct";
+}
+
+function isMatchingLinkNavigation(
+  intent: PendingLinkIntent | undefined,
+  signal: NavigationSignal,
+  activeRun: ActiveRun,
+  activeGame: ActiveGame,
+): boolean {
+  return (
+    isMatchingLinkIntent(intent, signal, activeRun, activeGame) ||
+    isMatchingRedirectedLinkIntent(intent, signal, activeRun, activeGame)
+  );
+}
+
+function isMatchingLinkIntent(
+  intent: PendingLinkIntent | undefined,
+  signal: NavigationSignal,
+  activeRun: ActiveRun,
+  activeGame: ActiveGame,
+): boolean {
+  const intentAge = intent
+    ? Date.now() - new Date(intent.observedAt).getTime()
+    : Number.POSITIVE_INFINITY;
+  return (
+    intent !== undefined &&
+    intent.gameId === activeGame.gameId &&
+    intent.tabId === signal.tabId &&
+    intent.fromArticleKey === activeRun.lastArticleKey &&
+    intent.toArticleKey === signal.articleKey &&
+    intentAge >= 0 &&
+    intentAge <= LINK_INTENT_MAX_AGE_MS
+  );
+}
+
+function isMatchingRedirectedLinkIntent(
+  intent: PendingLinkIntent | undefined,
+  signal: NavigationSignal,
+  activeRun: ActiveRun,
+  activeGame: ActiveGame,
+): boolean {
+  const intentAge = intent
+    ? Date.now() - new Date(intent.observedAt).getTime()
+    : Number.POSITIVE_INFINITY;
+  return (
+    intent !== undefined &&
+    intent.gameId === activeGame.gameId &&
+    intent.tabId === signal.tabId &&
+    intent.fromArticleKey === activeRun.lastArticleKey &&
+    signal.fromArticleKey === intent.toArticleKey &&
+    signal.articleKey !== intent.toArticleKey &&
+    intentAge >= 0 &&
+    intentAge <= LINK_INTENT_MAX_AGE_MS
+  );
 }
 
 async function flushOutbox(): Promise<void> {
@@ -429,6 +620,13 @@ async function resetActiveGame(
   }
 
   const gameId = isActiveGame(activeGame) ? activeGame.gameId : expectedGameId;
+  const lastCompletedGame =
+    outcome === "finished" && isActiveGame(activeGame)
+      ? {
+          targetArticleKey: activeGame.targetArticleKey,
+          targetArticleTitle: activeGame.targetArticleTitle,
+        }
+      : null;
   const remainingOutbox = gameId
     ? asOutbox(navigationOutbox).filter((entry) => entry.gameId !== gameId)
     : asOutbox(navigationOutbox);
@@ -446,6 +644,8 @@ async function resetActiveGame(
   await chrome.storage.local.set({
     navigationOutbox: remainingOutbox,
     lastGameOutcome: { outcome, occurredAt },
+    lastCompletedGame,
+    lastFinalizedGameId: gameId ?? null,
   });
   recentNavigationSignals.clear();
 }
@@ -535,8 +735,10 @@ interface PendingLinkIntent {
 interface NavigationSignal {
   tabId: number;
   articleKey: string;
+  fromArticleKey?: string;
   transitionType: string;
   transitionQualifiers: string[];
+  source: "browser" | "content" | "content_delayed";
 }
 
 interface NavigationOutboxEntry {
@@ -551,6 +753,10 @@ interface PairingCompletedMessage {
   roomId: string;
 }
 
+interface DisconnectExtensionMessage {
+  type: "DISCONNECT_EXTENSION";
+}
+
 interface LinkIntentMessage {
   type: "LINK_INTENT";
   fromArticleKey: string;
@@ -560,6 +766,7 @@ interface LinkIntentMessage {
 
 interface PageNavigationObservedMessage {
   type: "PAGE_NAVIGATION_OBSERVED";
+  fromArticleKey: string;
   articleKey: string;
   observedAt: string;
 }
@@ -576,6 +783,14 @@ function isPairingCompletedMessage(value: unknown): value is PairingCompletedMes
   }
   const candidate = value as Partial<PairingCompletedMessage>;
   return candidate.type === "PAIRING_COMPLETED" && typeof candidate.roomId === "string";
+}
+
+function isDisconnectExtensionMessage(value: unknown): value is DisconnectExtensionMessage {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value as Partial<DisconnectExtensionMessage>).type === "DISCONNECT_EXTENSION"
+  );
 }
 
 function isLinkIntentMessage(value: unknown): value is LinkIntentMessage {
@@ -599,6 +814,9 @@ function isPageNavigationObservedMessage(value: unknown): value is PageNavigatio
   const candidate = value as Partial<PageNavigationObservedMessage>;
   return (
     candidate.type === "PAGE_NAVIGATION_OBSERVED" &&
+    typeof candidate.fromArticleKey === "string" &&
+    candidate.fromArticleKey.length >= 1 &&
+    candidate.fromArticleKey.length <= 300 &&
     typeof candidate.articleKey === "string" &&
     candidate.articleKey.length >= 1 &&
     candidate.articleKey.length <= 300 &&

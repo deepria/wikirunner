@@ -63,12 +63,13 @@ nav {
 }
 
 .hero h1 {
-  max-width: 13ch;
+  max-width: 20ch;
   margin: 0.4rem 0 1.5rem;
   font-size: clamp(3.3rem, 8vw, 8.6rem);
   font-weight: 900;
   letter-spacing: -0.085em;
   line-height: 0.89;
+  word-break: keep-all;
 }
 
 .summary {
@@ -77,6 +78,7 @@ nav {
   color: var(--muted);
   font-size: clamp(1rem, 2vw, 1.25rem);
   line-height: 1.65;
+  word-break: keep-all;
 }
 
 .actions {
@@ -128,6 +130,7 @@ nav {
   font-size: clamp(2rem, 4vw, 3.4rem);
   letter-spacing: -0.06em;
   line-height: 1;
+  word-break: keep-all;
 }
 
 .rule-card ol {
@@ -258,6 +261,58 @@ nav {
   line-height: 0.9;
 }
 
+.room-code-value,
+.pairing-code-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.room-code-value h1 {
+  margin: 0.25rem 0 0;
+}
+
+.copy-button {
+  min-height: 2.5rem;
+  padding: 0 0.85rem;
+  border: 1px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.copy-button:hover,
+.copy-button:focus-visible {
+  background: var(--acid);
+}
+
+.connection-action .copy-button {
+  min-height: 2.5rem;
+  margin: 0;
+  background: transparent;
+  color: var(--ink);
+}
+
+.connection-action .copy-button:hover,
+.connection-action .copy-button:focus-visible {
+  background: var(--acid);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .lobby-header p {
   color: var(--muted);
 }
@@ -296,7 +351,7 @@ nav {
   list-style: none;
 }
 
-.leaderboard-list li {
+.leaderboard-list > li {
   display: grid;
   grid-template-columns: 5rem minmax(8rem, 1fr) 7rem 7rem auto;
   align-items: center;
@@ -308,6 +363,53 @@ nav {
 .leaderboard-list small {
   color: #a32314;
   font-weight: 800;
+}
+
+.route-details {
+  grid-column: 1 / -1;
+  padding: 0 0 1rem;
+}
+
+.route-details summary {
+  width: fit-content;
+  padding: 0.4rem 0;
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.route-details > p {
+  margin: 0.5rem 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.route-list {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  border-left: 2px solid var(--acid);
+  list-style: none;
+}
+
+.route-list li {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+
+.route-list li > span,
+.route-list small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.route-list strong {
+  overflow-wrap: anywhere;
 }
 
 .lobby-card {
@@ -481,6 +583,24 @@ nav {
   cursor: default;
 }
 
+.start-panel button.danger-button {
+  background: #a32314;
+  color: #fff;
+}
+
+.start-panel.next-game-panel {
+  background: var(--acid);
+  color: var(--ink);
+}
+
+.start-panel.next-game-panel p {
+  color: var(--muted);
+}
+
+.start-panel.next-game-panel button {
+  background: var(--paper);
+}
+
 .connection-ok {
   font-weight: 800;
 }
@@ -562,14 +682,22 @@ nav {
     grid-template-columns: 1fr;
   }
 
-  .leaderboard-list li {
+  .leaderboard-list > li {
     grid-template-columns: 4rem 1fr auto;
     gap: 0.5rem;
     padding: 0.75rem 0;
   }
 
-  .leaderboard-list li span:nth-of-type(2),
-  .leaderboard-list small {
+  .leaderboard-list > li > span:nth-of-type(2),
+  .leaderboard-list > li > small {
     grid-column: 2 / -1;
+  }
+
+  .route-list li {
+    grid-template-columns: 3rem minmax(0, 1fr);
+  }
+
+  .route-list small {
+    grid-column: 2;
   }
 }
