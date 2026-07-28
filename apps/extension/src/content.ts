@@ -284,6 +284,15 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
 
   function applyFairPlayUiBlocking(): void {
     document.documentElement.classList.toggle("wikirunner-fair-play-active", fairPlayEnabled);
+    const header = document.querySelector<HTMLElement>(
+      "#app > div > div:first-child, body > header",
+    );
+    if (header?.querySelector('input[type="search"], a[href="/random"]')) {
+      header.classList.toggle("wikirunner-fair-play-hidden", fairPlayEnabled);
+    }
+    for (const sidebar of findFairPlaySidebars()) {
+      sidebar.classList.toggle("wikirunner-fair-play-hidden", fairPlayEnabled);
+    }
     for (const target of document.querySelectorAll<HTMLElement>(
       'input[type="search"], a[href="/random"], a[title="검색"], a[title="아무 문서로 이동"]',
     )) {
@@ -300,6 +309,51 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
         );
       }
     }
+  }
+
+  function findFairPlaySidebars(): HTMLElement[] {
+    const sidebars = new Set<HTMLElement>();
+    for (const candidate of document.querySelectorAll<HTMLElement>(
+      'aside, [role="complementary"], [class*="sidebar" i], [class*="side-bar" i]',
+    )) {
+      sidebars.add(candidate);
+    }
+
+    const sidebarMarkers = ["실시간 랭킹", "실시간 검색어", "인기 문서", "최근 변경"];
+    for (const marker of sidebarMarkers) {
+      for (const element of document.querySelectorAll<HTMLElement>(
+        "a, span, strong, h2, h3, div",
+      )) {
+        const text = element.textContent?.replaceAll(/\s+/g, "") ?? "";
+        if (!text.includes(marker.replaceAll(/\s+/g, ""))) {
+          continue;
+        }
+        const sidebar = closestSidebarContainer(element);
+        if (sidebar) {
+          sidebars.add(sidebar);
+        }
+      }
+    }
+    return [...sidebars];
+  }
+
+  function closestSidebarContainer(element: HTMLElement): HTMLElement | null {
+    const article = document.querySelector("article");
+    let candidate: HTMLElement | null = element;
+    for (let depth = 0; candidate && depth < 6; depth += 1) {
+      const rect = candidate.getBoundingClientRect();
+      if (
+        !candidate.contains(article) &&
+        rect.width > 120 &&
+        rect.width < 520 &&
+        rect.height > 40 &&
+        rect.left >= window.innerWidth * 0.55
+      ) {
+        return candidate;
+      }
+      candidate = candidate.parentElement;
+    }
+    return null;
   }
 
   function showFairPlayNotice(message: string): void {

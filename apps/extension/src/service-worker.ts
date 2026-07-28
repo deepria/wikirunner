@@ -555,7 +555,7 @@ async function getFairPlayState(tabId: number): Promise<{ enabled: boolean }> {
 }
 
 async function enableFairPlayRules(tabId: number): Promise<void> {
-  await chrome.declarativeNetRequest.updateDynamicRules({
+  await chrome.declarativeNetRequest.updateSessionRules({
     removeRuleIds: [...FAIR_PLAY_RULE_IDS],
     addRules: [
       {
@@ -583,7 +583,7 @@ async function enableFairPlayRules(tabId: number): Promise<void> {
 }
 
 async function clearFairPlayRules(): Promise<void> {
-  await chrome.declarativeNetRequest.updateDynamicRules({
+  await chrome.declarativeNetRequest.updateSessionRules({
     removeRuleIds: [...FAIR_PLAY_RULE_IDS],
   });
 }
