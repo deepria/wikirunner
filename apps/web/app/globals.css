@@ -378,6 +378,25 @@ nav {
   cursor: pointer;
 }
 
+.generated-path {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.generated-path h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.generated-path ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.2rem;
+  margin: 0.75rem 0 0;
+  padding-left: 1.25rem;
+}
+
 .route-details > p {
   margin: 0.5rem 0;
   color: var(--muted);
@@ -489,6 +508,19 @@ nav {
   gap: 0.45rem;
   font-size: 0.8rem;
   font-weight: 800;
+}
+
+.random-path-controls {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.85rem;
+  border: 1px dashed var(--line);
+}
+
+.form-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .settings-form input,

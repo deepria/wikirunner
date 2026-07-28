@@ -78,6 +78,12 @@ const prepareNextGameSchema = commandSchema.extend({
   expectedVersion: z.number().int().positive(),
 });
 
+const generateRandomPathSchema = commandSchema.extend({
+  roomId: z.string().uuid(),
+  expectedVersion: z.number().int().positive(),
+  difficulty: z.enum(["easy", "normal", "hard"]).default("easy"),
+});
+
 const endGameSchema = commandSchema.extend({
   gameId: z.string().uuid(),
 });
@@ -137,6 +143,8 @@ type ApiErrorCode =
   | "GAME_NOT_ACTIVE"
   | "ROOM_SETTINGS_REQUIRED"
   | "PLAYERS_NOT_READY"
+  | "RANDOM_ROUTE_UNAVAILABLE"
+  | "RANDOM_REROLL_LIMIT"
   | "RUN_ACCESS_DENIED"
   | "GAME_NOT_STARTED"
   | "RUN_NOT_ACTIVE"
@@ -159,6 +167,7 @@ interface RoomRow {
   draft_target_article_key: string | null;
   draft_target_article_title: string | null;
   draft_article_source: "host" | "pool" | "random";
+  draft_random_generation_count: number;
   expires_at: string;
   version: number;
 }
@@ -181,6 +190,8 @@ interface GameRow {
   start_article_title: string;
   target_article_key: string;
   target_article_title: string;
+  article_source: "host" | "pool" | "random";
+  generated_path: unknown;
 }
 
 interface RunRow {
@@ -250,6 +261,8 @@ Deno.serve(async (request) => {
       response = await joinRoom(request, supabase, requestId);
     } else if (request.method === "PATCH" && path.match(/^\/v1\/rooms\/[^/]+\/settings$/)) {
       response = await updateRoomSettings(request, path, supabase, requestId);
+    } else if (request.method === "POST" && path.match(/^\/v1\/rooms\/[^/]+\/random-path$/)) {
+      response = await generateRandomPath(request, path, supabase, requestId);
     } else if (request.method === "POST" && path.match(/^\/v1\/players\/[^/]+\/pairing-code$/)) {
       response = await issuePairingCode(request, path, user.id, supabase, requestId);
     } else if (request.method === "POST" && path === "/v1/extension/pair") {
@@ -690,6 +703,184 @@ async function updateRoomSettings(
   return successResponse(data);
 }
 
+async function generateRandomPath(
+  request: Request,
+  path: string,
+  supabase: SupabaseClient,
+  requestId: string,
+): Promise<Response> {
+  const pathRoomId = path.split("/")[3];
+  if (!pathRoomId || !roomIdPattern.test(pathRoomId)) {
+    return errorResponse("INVALID_REQUEST", "올바르지 않은 방 ID입니다.", requestId, 400);
+  }
+
+  const input = await parseCommand(request, generateRandomPathSchema, requestId);
+  if (input instanceof Response) {
+    return input;
+  }
+  if (input.roomId !== pathRoomId) {
+    return errorResponse(
+      "INVALID_REQUEST",
+      "요청 경로와 본문의 방 ID가 일치하지 않습니다.",
+      requestId,
+      400,
+    );
+  }
+
+  let generatedPath: Article[];
+  try {
+    generatedPath = await generateNamuWikiPath(input.difficulty);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        requestId,
+        operation: "generate_random_path",
+        reason: error instanceof Error ? error.message : "unknown",
+      }),
+    );
+    return errorResponse(
+      "RANDOM_ROUTE_UNAVAILABLE",
+      "지금은 랜덤 경로를 찾지 못했습니다. 다시 추첨해 주세요.",
+      requestId,
+      503,
+    );
+  }
+
+  const startArticle = generatedPath[0];
+  const targetArticle = generatedPath.at(-1);
+  if (!startArticle || !targetArticle) {
+    return errorResponse(
+      "RANDOM_ROUTE_UNAVAILABLE",
+      "지금은 랜덤 경로를 찾지 못했습니다. 다시 추첨해 주세요.",
+      requestId,
+      503,
+    );
+  }
+
+  const { data, error } = await supabase.rpc("set_random_room_path", {
+    p_room_id: input.roomId,
+    p_expected_version: input.expectedVersion,
+    p_start_article_key: startArticle.key,
+    p_start_article_title: startArticle.title,
+    p_target_article_key: targetArticle.key,
+    p_target_article_title: targetArticle.title,
+    p_generated_path: generatedPath,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+  if (error) {
+    return databaseErrorResponse(error, requestId);
+  }
+
+  return successResponse(data);
+}
+
+type Article = { key: string; title: string };
+type RandomDifficulty = "easy" | "normal" | "hard";
+
+const NAMUWIKI_ORIGIN = "https://namu.wiki";
+const NAMUWIKI_ARTICLE_PREFIX = "/w/";
+const RANDOM_PATH_DEPTHS: Record<RandomDifficulty, readonly number[]> = {
+  easy: [3, 4],
+  normal: [5, 6],
+  hard: [7, 8],
+};
+
+async function generateNamuWikiPath(difficulty: RandomDifficulty): Promise<Article[]> {
+  const targetDepth = pickRandom(RANDOM_PATH_DEPTHS[difficulty]);
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      const start = await fetchRandomNamuWikiArticle();
+      const path = [start];
+      const seenKeys = new Set([start.key]);
+      let current = start;
+
+      for (let step = 0; step < targetDepth; step += 1) {
+        const links = await fetchNamuWikiLinks(current);
+        const nextCandidates = links.filter((article) => !seenKeys.has(article.key));
+        if (nextCandidates.length === 0) {
+          break;
+        }
+        current = pickRandom(nextCandidates);
+        path.push(current);
+        seenKeys.add(current.key);
+      }
+
+      if (path.length === targetDepth + 1 && path[0].key !== path.at(-1)?.key) {
+        return path;
+      }
+    } catch {
+      // 개별 문서 오류나 임시 차단은 다음 랜덤 출발지에서 다시 시도한다.
+    }
+  }
+
+  throw new Error("path_not_found");
+}
+
+async function fetchRandomNamuWikiArticle(): Promise<Article> {
+  const response = await fetch(`${NAMUWIKI_ORIGIN}/random`, {
+    redirect: "follow",
+    headers: { "User-Agent": "WikiRunner/0.1 (random path generator)" },
+  });
+  if (!response.ok) {
+    throw new Error(`random_page_${response.status}`);
+  }
+  const article = articleFromUrl(response.url);
+  if (!article) {
+    throw new Error("random_page_not_article");
+  }
+  return article;
+}
+
+async function fetchNamuWikiLinks(article: Article): Promise<Article[]> {
+  const response = await fetch(`${NAMUWIKI_ORIGIN}/w/${encodeURIComponent(article.key)}`, {
+    headers: { "User-Agent": "WikiRunner/0.1 (random path generator)" },
+  });
+  if (!response.ok) {
+    throw new Error(`article_${response.status}`);
+  }
+  const html = await response.text();
+  const links = new Map<string, Article>();
+  for (const match of html.matchAll(/<a\\b[^>]*\\bhref=["']([^"']+)["'][^>]*>/gi)) {
+    const candidate = articleFromHref(match[1]);
+    if (candidate) {
+      links.set(candidate.key, candidate);
+    }
+  }
+  return [...links.values()];
+}
+
+function articleFromHref(href: string): Article | null {
+  try {
+    return articleFromUrl(new URL(href.replaceAll("&amp;", "&"), NAMUWIKI_ORIGIN).toString());
+  } catch {
+    return null;
+  }
+}
+
+function articleFromUrl(rawUrl: string): Article | null {
+  try {
+    const url = new URL(rawUrl);
+    if (url.origin !== NAMUWIKI_ORIGIN || !url.pathname.startsWith(NAMUWIKI_ARTICLE_PREFIX)) {
+      return null;
+    }
+    const key = decodeURIComponent(url.pathname.slice(NAMUWIKI_ARTICLE_PREFIX.length)).normalize(
+      "NFC",
+    );
+    if (!key || key.includes(":")) {
+      return null;
+    }
+    return { key, title: key };
+  } catch {
+    return null;
+  }
+}
+
+function pickRandom<T>(items: readonly T[]): T {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
 async function createRoom(
   request: Request,
   supabase: SupabaseClient,
@@ -761,6 +952,7 @@ async function getRoomSnapshot(
         "draft_target_article_key",
         "draft_target_article_title",
         "draft_article_source",
+        "draft_random_generation_count",
         "expires_at",
         "version",
       ].join(","),
@@ -814,7 +1006,7 @@ async function getRoomSnapshot(
     const gameResult = await supabase
       .from("games")
       .select(
-        "id,status,scheduled_at,start_article_key,start_article_title,target_article_key,target_article_title",
+        "id,status,scheduled_at,start_article_key,start_article_title,target_article_key,target_article_title,article_source,generated_path",
       )
       .eq("id", room.current_game_id)
       .maybeSingle<GameRow>();
@@ -868,6 +1060,7 @@ async function getRoomSnapshot(
                 title: room.draft_target_article_title,
               },
               articleSource: room.draft_article_source,
+              randomGenerationCount: room.draft_random_generation_count,
             }
           : null,
     },
@@ -884,6 +1077,11 @@ async function getRoomSnapshot(
             key: game.target_article_key,
             title: game.target_article_title,
           },
+          generatedPath:
+            (game.status === "finished" || game.status === "cancelled") &&
+            game.article_source === "random"
+              ? parseGeneratedPath(game.generated_path)
+              : null,
         }
       : null,
     players: (playersResult.data ?? []).map((player) => ({
@@ -912,6 +1110,30 @@ async function getRoomSnapshot(
       isCurrentPlayer: run.player_id === ownPlayerId,
     })),
   });
+}
+
+function parseGeneratedPath(value: unknown): Article[] | null {
+  if (!Array.isArray(value) || value.length < 2) {
+    return null;
+  }
+  const articles: Article[] = [];
+  for (const item of value) {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      typeof (item as Article).key !== "string" ||
+      typeof (item as Article).title !== "string"
+    ) {
+      return null;
+    }
+    const key = (item as Article).key.trim().normalize("NFC");
+    const title = (item as Article).title.trim().normalize("NFC");
+    if (!key || !title) {
+      return null;
+    }
+    articles.push({ key, title });
+  }
+  return articles;
 }
 
 async function getGameRoutes(
@@ -1222,6 +1444,21 @@ function databaseErrorResponse(
       code: "PLAYERS_NOT_READY",
       message: "모든 참가자가 확장 프로그램을 연결하고 준비해야 합니다.",
       status: 409,
+    },
+    RANDOM_REROLL_LIMIT: {
+      code: "RANDOM_REROLL_LIMIT",
+      message: "이번 경기 준비에서는 랜덤 추첨을 10회까지 할 수 있습니다.",
+      status: 409,
+    },
+    INVALID_RANDOM_PATH: {
+      code: "INVALID_REQUEST",
+      message: "생성된 랜덤 경로가 올바르지 않습니다. 다시 추첨해 주세요.",
+      status: 400,
+    },
+    RANDOM_PATH_REQUIRED: {
+      code: "INVALID_REQUEST",
+      message: "랜덤 경로를 먼저 추첨해 주세요.",
+      status: 400,
     },
     RUN_ACCESS_DENIED: {
       code: "RUN_ACCESS_DENIED",

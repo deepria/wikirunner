@@ -232,6 +232,7 @@ export default function RoomPage() {
               initialStartArticle={snapshot.room.draftSettings?.startArticle.title ?? ""}
               initialTargetArticle={snapshot.room.draftSettings?.targetArticle.title ?? ""}
               maxPlayers={snapshot.room.maxPlayers}
+              randomGenerationCount={snapshot.room.draftSettings?.randomGenerationCount ?? 0}
               roomId={snapshot.room.id}
               version={snapshot.room.version}
               onSaved={loadSnapshot}

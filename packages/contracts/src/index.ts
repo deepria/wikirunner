@@ -23,6 +23,7 @@ export const NAVIGATION_EVENT_TYPES = [
   "tab_resume",
 ] as const;
 export const ARTICLE_SOURCES = ["host", "pool", "random"] as const;
+export const RANDOM_DIFFICULTIES = ["easy", "normal", "hard"] as const;
 
 export const roomStatusSchema = z.enum(ROOM_STATUSES);
 export const gameStatusSchema = z.enum(GAME_STATUSES);
@@ -31,6 +32,7 @@ export const connectionStatusSchema = z.enum(CONNECTION_STATUSES);
 export const violationStatusSchema = z.enum(VIOLATION_STATUSES);
 export const navigationEventTypeSchema = z.enum(NAVIGATION_EVENT_TYPES);
 export const articleSourceSchema = z.enum(ARTICLE_SOURCES);
+export const randomDifficultySchema = z.enum(RANDOM_DIFFICULTIES);
 
 export type RoomStatus = z.infer<typeof roomStatusSchema>;
 export type GameStatus = z.infer<typeof gameStatusSchema>;
@@ -39,6 +41,7 @@ export type ConnectionStatus = z.infer<typeof connectionStatusSchema>;
 export type ViolationStatus = z.infer<typeof violationStatusSchema>;
 export type NavigationEventType = z.infer<typeof navigationEventTypeSchema>;
 export type ArticleSource = z.infer<typeof articleSourceSchema>;
+export type RandomDifficulty = z.infer<typeof randomDifficultySchema>;
 
 const idSchema = z.string().uuid();
 const instantSchema = z.string().datetime({ offset: true });
@@ -91,6 +94,12 @@ export const updateRoomSettingsCommandSchema = commandMetaSchema
     message: "시작 문서와 목표 문서는 달라야 합니다.",
     path: ["targetArticle"],
   });
+
+export const generateRandomPathCommandSchema = commandMetaSchema.extend({
+  roomId: idSchema,
+  expectedVersion: z.number().int().positive(),
+  difficulty: randomDifficultySchema.default("easy"),
+});
 
 export const pairingCodeSchema = z
   .string()
@@ -223,6 +232,7 @@ export const gameSummarySchema = z.object({
   scheduledAt: instantSchema,
   startArticle: articleSchema,
   targetArticle: articleSchema,
+  generatedPath: z.array(articleSchema).min(2).nullable().optional(),
 });
 
 export const countdownResultSchema = z.object({
@@ -314,6 +324,7 @@ export const roomSnapshotSchema = z.object({
         startArticle: articleSchema,
         targetArticle: articleSchema,
         articleSource: articleSourceSchema,
+        randomGenerationCount: z.number().int().min(0).max(10),
       })
       .nullable(),
   }),
@@ -333,6 +344,7 @@ export const roomSnapshotSchema = z.object({
 export type CreateRoomCommand = z.infer<typeof createRoomCommandSchema>;
 export type JoinRoomCommand = z.infer<typeof joinRoomCommandSchema>;
 export type UpdateRoomSettingsCommand = z.infer<typeof updateRoomSettingsCommandSchema>;
+export type GenerateRandomPathCommand = z.infer<typeof generateRandomPathCommandSchema>;
 export type IssuePairingCodeCommand = z.infer<typeof issuePairingCodeCommandSchema>;
 export type RedeemPairingCodeCommand = z.infer<typeof redeemPairingCodeCommandSchema>;
 export type DisconnectExtensionCommand = z.infer<typeof disconnectExtensionCommandSchema>;

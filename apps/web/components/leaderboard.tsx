@@ -90,6 +90,16 @@ export function Leaderboard({ game, runs }: LeaderboardProps) {
           );
         })}
       </ol>
+      {game.generatedPath?.length ? (
+        <section className="generated-path">
+          <h3>이번 랜덤 생성 경로</h3>
+          <ol>
+            {game.generatedPath.map((article) => (
+              <li key={article.key}>{article.title}</li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
     </section>
   );
 }
