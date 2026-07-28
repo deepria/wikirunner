@@ -12,7 +12,6 @@ import {
   type PrepareNextGameResult,
   pairingCodeResultSchema,
   prepareNextGameResultSchema,
-  type RandomDifficulty,
   type ReadyResult,
   type RoomCommandResult,
   type RoomSettingsResult,
@@ -104,29 +103,6 @@ export async function updateRoomSettings(input: {
         title: targetArticleTitle,
       },
       articleSource: "host",
-    }),
-    headers: {
-      "Content-Type": "application/json",
-      "Idempotency-Key": idempotencyKey,
-    },
-  });
-  return serverEnvelopeSchema(roomSettingsResultSchema).parse(envelope).data;
-}
-
-export async function generateRandomRoomPath(input: {
-  roomId: string;
-  expectedVersion: number;
-  difficulty: RandomDifficulty;
-}): Promise<RoomSettingsResult> {
-  const idempotencyKey = crypto.randomUUID();
-  const envelope = await gameApiFetch(`/v1/rooms/${input.roomId}/random-path`, {
-    method: "POST",
-    body: JSON.stringify({
-      schemaVersion: 1,
-      idempotencyKey,
-      roomId: input.roomId,
-      expectedVersion: input.expectedVersion,
-      difficulty: input.difficulty,
     }),
     headers: {
       "Content-Type": "application/json",

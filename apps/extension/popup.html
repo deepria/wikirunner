@@ -63,6 +63,7 @@
         font-weight: 800;
       }
       input,
+      select,
       button {
         min-height: 40px;
         border: 1px solid #191b1a;
@@ -77,6 +78,10 @@
         font-weight: 800;
         letter-spacing: 0.1em;
         text-transform: uppercase;
+      }
+      select {
+        padding: 0 10px;
+        background: #fffef8;
       }
       button {
         background: #d9ff43;
@@ -130,6 +135,20 @@
     <section class="connection-controls" id="connection-controls" hidden>
       <button class="secondary" id="disconnect-button" type="button">연동 해제</button>
       <p class="error" id="disconnect-error" role="alert"></p>
+    </section>
+    <section class="connection-controls" id="random-path-controls" hidden>
+      <label>
+        방장 랜덤 난이도
+        <select id="random-difficulty">
+          <option value="easy">쉬움 · 3~4단계</option>
+          <option value="normal">보통 · 5~6단계</option>
+          <option value="hard">어려움 · 7~8단계</option>
+        </select>
+      </label>
+      <button class="secondary" id="generate-random-path-button" type="button">
+        랜덤 시작·목표 추첨
+      </button>
+      <p class="error" id="random-path-error" role="alert"></p>
     </section>
     <section class="web-controls" id="web-controls">
       <button class="secondary" id="open-home-button" type="button">웹 메인으로 이동</button>

@@ -15,6 +15,11 @@ import {
 } from "@wikirunner/contracts";
 import { ensureExtensionSession } from "./supabase";
 
+export interface GeneratedPathArticle {
+  key: string;
+  title: string;
+}
+
 export async function pairExtension(pairingCode: string): Promise<PairingResult> {
   const idempotencyKey = crypto.randomUUID();
   const envelope = await apiFetch("/v1/extension/pair", {
@@ -53,6 +58,35 @@ export async function getExtensionSnapshot(roomId: string): Promise<RoomSnapshot
     method: "GET",
   });
   return serverEnvelopeSchema(roomSnapshotSchema).parse(envelope).data;
+}
+
+export async function submitGeneratedRandomPath(input: {
+  roomId: string;
+  expectedVersion: number;
+  generatedPath: GeneratedPathArticle[];
+}): Promise<void> {
+  const idempotencyKey = crypto.randomUUID();
+  const startArticle = input.generatedPath[0];
+  const targetArticle = input.generatedPath.at(-1);
+  if (!startArticle || !targetArticle) {
+    throw new Error("랜덤 경로가 비어 있습니다.");
+  }
+  await apiFetch(`/v1/rooms/${input.roomId}/generated-path`, {
+    method: "POST",
+    body: JSON.stringify({
+      schemaVersion: 1,
+      idempotencyKey,
+      roomId: input.roomId,
+      expectedVersion: input.expectedVersion,
+      startArticle,
+      targetArticle,
+      generatedPath: input.generatedPath,
+    }),
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey,
+    },
+  });
 }
 
 export async function submitNavigationEvent(

@@ -7,7 +7,13 @@ import {
   type RunSummary,
 } from "@wikirunner/contracts";
 import { normalizeNamuWikiUrl } from "@wikirunner/namuwiki";
-import { disconnectExtension, getExtensionSnapshot, submitNavigationEvent } from "./game-api";
+import {
+  disconnectExtension,
+  type GeneratedPathArticle,
+  getExtensionSnapshot,
+  submitGeneratedRandomPath,
+  submitNavigationEvent,
+} from "./game-api";
 import { ensureExtensionSession, getExtensionSupabaseClient } from "./supabase";
 
 const GAME_START_ALARM = "wikirunner-game-start";
@@ -55,6 +61,18 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
         sendResponse({
           ok: false,
           message: error instanceof Error ? error.message : "연동 해제 실패",
+        }),
+      );
+    return true;
+  }
+
+  if (isGenerateRandomPathMessage(message)) {
+    void generateRandomPathFromExtension(message.difficulty)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error: unknown) =>
+        sendResponse({
+          ok: false,
+          message: error instanceof Error ? error.message : "랜덤 경로를 만들지 못했습니다.",
         }),
       );
     return true;
@@ -226,6 +244,132 @@ async function establishRoomSubscription(roomId: string): Promise<void> {
     .subscribe();
   roomChannel = channel;
   subscribedRoomId = roomId;
+}
+
+async function generateRandomPathFromExtension(difficulty: RandomDifficulty): Promise<void> {
+  const { activeRoomId } = await chrome.storage.local.get("activeRoomId");
+  if (typeof activeRoomId !== "string") {
+    throw new Error("먼저 방장 계정과 확장 프로그램을 연결해 주세요.");
+  }
+
+  const snapshot = await getExtensionSnapshot(activeRoomId);
+  const currentPlayer = snapshot.players.find((player) => player.isCurrentPlayer);
+  if (!currentPlayer || currentPlayer.id !== snapshot.room.hostPlayerId) {
+    throw new Error("방장만 랜덤 경로를 추첨할 수 있습니다.");
+  }
+  if (snapshot.room.status !== "waiting") {
+    throw new Error("다음 경기 준비 상태에서만 랜덤 경로를 추첨할 수 있습니다.");
+  }
+  if ((snapshot.room.draftSettings?.randomGenerationCount ?? 0) >= 10) {
+    throw new Error("이번 경기 준비에서는 랜덤 추첨을 10회까지 할 수 있습니다.");
+  }
+
+  const generatedPath = await generateNamuWikiPathInBrowser(difficulty);
+  await submitGeneratedRandomPath({
+    roomId: snapshot.room.id,
+    expectedVersion: snapshot.room.version,
+    generatedPath,
+  });
+}
+
+type RandomDifficulty = "easy" | "normal" | "hard";
+
+const RANDOM_PATH_DEPTHS: Record<RandomDifficulty, readonly number[]> = {
+  easy: [3, 4],
+  normal: [5, 6],
+  hard: [7, 8],
+};
+const NAMUWIKI_ORIGIN = "https://namu.wiki";
+
+async function generateNamuWikiPathInBrowser(
+  difficulty: RandomDifficulty,
+): Promise<GeneratedPathArticle[]> {
+  const targetDepth = pickRandom(RANDOM_PATH_DEPTHS[difficulty]);
+  let lastError = "경로를 찾지 못했습니다.";
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      const start = await fetchRandomNamuWikiArticle();
+      const path = [start];
+      const seen = new Set([start.key]);
+      let current = start;
+
+      for (let step = 0; step < targetDepth; step += 1) {
+        const candidates = (await fetchNamuWikiLinks(current)).filter(
+          (article) => !seen.has(article.key),
+        );
+        if (candidates.length === 0) {
+          throw new Error("연결된 문서가 부족합니다.");
+        }
+        current = pickRandom(candidates);
+        path.push(current);
+        seen.add(current.key);
+      }
+      return path;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : lastError;
+    }
+  }
+  throw new Error(`랜덤 경로를 찾지 못했습니다. ${lastError}`);
+}
+
+async function fetchRandomNamuWikiArticle(): Promise<GeneratedPathArticle> {
+  const response = await fetch(`${NAMUWIKI_ORIGIN}/random`, { redirect: "follow" });
+  if (!response.ok) {
+    throw new Error(`나무위키 랜덤 문서를 불러오지 못했습니다. (${response.status})`);
+  }
+  const article = articleFromNamuWikiUrl(response.url);
+  if (!article) {
+    throw new Error("나무위키 랜덤 문서의 주소를 확인하지 못했습니다.");
+  }
+  return article;
+}
+
+async function fetchNamuWikiLinks(article: GeneratedPathArticle): Promise<GeneratedPathArticle[]> {
+  const response = await fetch(`${NAMUWIKI_ORIGIN}/w/${encodeURIComponent(article.key)}`);
+  if (!response.ok) {
+    throw new Error(`문서를 불러오지 못했습니다. (${response.status})`);
+  }
+  const links = new Map<string, GeneratedPathArticle>();
+  const html = await response.text();
+  for (const match of html.matchAll(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>/gi)) {
+    const href = match[1];
+    if (!href) {
+      continue;
+    }
+    const candidate = articleFromNamuWikiUrl(href);
+    if (candidate) {
+      links.set(candidate.key, candidate);
+    }
+  }
+  if (links.size === 0) {
+    throw new Error("문서에서 내부 링크를 찾지 못했습니다.");
+  }
+  return [...links.values()];
+}
+
+function articleFromNamuWikiUrl(value: string): GeneratedPathArticle | null {
+  try {
+    const url = new URL(value.replaceAll("&amp;", "&"), NAMUWIKI_ORIGIN);
+    if (url.origin !== NAMUWIKI_ORIGIN || !url.pathname.startsWith("/w/")) {
+      return null;
+    }
+    const key = decodeURIComponent(url.pathname.slice("/w/".length)).normalize("NFC");
+    if (!key || key.includes(":")) {
+      return null;
+    }
+    return { key, title: key };
+  } catch {
+    return null;
+  }
+}
+
+function pickRandom<T>(items: readonly T[]): T {
+  const item = items[Math.floor(Math.random() * items.length)];
+  if (item === undefined) {
+    throw new Error("선택할 문서가 없습니다.");
+  }
+  return item;
 }
 
 async function disconnectPairing(): Promise<void> {
@@ -757,6 +901,11 @@ interface DisconnectExtensionMessage {
   type: "DISCONNECT_EXTENSION";
 }
 
+interface GenerateRandomPathMessage {
+  type: "GENERATE_RANDOM_PATH";
+  difficulty: RandomDifficulty;
+}
+
 interface LinkIntentMessage {
   type: "LINK_INTENT";
   fromArticleKey: string;
@@ -790,6 +939,19 @@ function isDisconnectExtensionMessage(value: unknown): value is DisconnectExtens
     value !== null &&
     typeof value === "object" &&
     (value as Partial<DisconnectExtensionMessage>).type === "DISCONNECT_EXTENSION"
+  );
+}
+
+function isGenerateRandomPathMessage(value: unknown): value is GenerateRandomPathMessage {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<GenerateRandomPathMessage>;
+  return (
+    candidate.type === "GENERATE_RANDOM_PATH" &&
+    (candidate.difficulty === "easy" ||
+      candidate.difficulty === "normal" ||
+      candidate.difficulty === "hard")
   );
 }
 

@@ -15,6 +15,12 @@ const disconnectError = document.querySelector<HTMLElement>("#disconnect-error")
 const openHomeButton = document.querySelector<HTMLButtonElement>("#open-home-button");
 const openRoomButton = document.querySelector<HTMLButtonElement>("#open-room-button");
 const webNavigationError = document.querySelector<HTMLElement>("#web-navigation-error");
+const randomPathControls = document.querySelector<HTMLElement>("#random-path-controls");
+const randomDifficulty = document.querySelector<HTMLSelectElement>("#random-difficulty");
+const generateRandomPathButton = document.querySelector<HTMLButtonElement>(
+  "#generate-random-path-button",
+);
+const randomPathError = document.querySelector<HTMLElement>("#random-path-error");
 
 const webAppUrl = getWebAppUrl();
 
@@ -157,6 +163,33 @@ openRoomButton?.addEventListener("click", async () => {
   await openWebPage(`/rooms/${encodeURIComponent(activeRoomId)}`);
 });
 
+generateRandomPathButton?.addEventListener("click", async () => {
+  if (!generateRandomPathButton || !randomDifficulty || !randomPathError) {
+    return;
+  }
+  generateRandomPathButton.disabled = true;
+  generateRandomPathButton.textContent = "경로 생성 중…";
+  randomPathError.textContent = "";
+  try {
+    const response: unknown = await chrome.runtime.sendMessage({
+      type: "GENERATE_RANDOM_PATH",
+      difficulty: randomDifficulty.value,
+    });
+    if (!isSuccessfulResponse(response)) {
+      throw new Error(
+        isErrorResponse(response) ? response.message : "랜덤 경로 생성 결과를 확인하지 못했습니다.",
+      );
+    }
+    randomPathError.textContent = "추첨했습니다. 웹 대기실에서 결과를 확인하세요.";
+  } catch (error) {
+    randomPathError.textContent =
+      error instanceof Error ? error.message : "랜덤 경로를 만들지 못했습니다.";
+  } finally {
+    generateRandomPathButton.disabled = false;
+    generateRandomPathButton.textContent = "랜덤 시작·목표 추첨";
+  }
+});
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (
     areaName === "local" &&
@@ -189,6 +222,9 @@ async function renderConnectionState() {
   if (typeof activeRoomId === "string") {
     updateWebNavigationControls(activeRoomId);
     connectionControls.hidden = false;
+    if (randomPathControls) {
+      randomPathControls.hidden = isActiveGame(activeGame) && isActiveRun(activeRun);
+    }
     if (isActiveGame(activeGame) && isActiveRun(activeRun)) {
       statusElement.textContent = "경기 중";
       description.textContent = `목표: ${activeGame.targetArticleTitle}`;
@@ -216,6 +252,9 @@ async function renderConnectionState() {
   pairingForm.hidden = false;
   gameControls.hidden = true;
   connectionControls.hidden = true;
+  if (randomPathControls) {
+    randomPathControls.hidden = true;
+  }
 }
 
 function getWebAppUrl(): URL | null {

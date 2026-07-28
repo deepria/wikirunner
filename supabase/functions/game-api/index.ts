@@ -84,6 +84,28 @@ const generateRandomPathSchema = commandSchema.extend({
   difficulty: z.enum(["easy", "normal", "hard"]).default("easy"),
 });
 
+const submitGeneratedRandomPathSchema = commandSchema.extend({
+  roomId: z.string().uuid(),
+  expectedVersion: z.number().int().positive(),
+  startArticle: z.object({
+    key: z.string().trim().min(1).max(300),
+    title: z.string().trim().min(1).max(300),
+  }),
+  targetArticle: z.object({
+    key: z.string().trim().min(1).max(300),
+    title: z.string().trim().min(1).max(300),
+  }),
+  generatedPath: z
+    .array(
+      z.object({
+        key: z.string().trim().min(1).max(300),
+        title: z.string().trim().min(1).max(300),
+      }),
+    )
+    .min(2)
+    .max(9),
+});
+
 const endGameSchema = commandSchema.extend({
   gameId: z.string().uuid(),
 });
@@ -144,6 +166,7 @@ type ApiErrorCode =
   | "ROOM_SETTINGS_REQUIRED"
   | "PLAYERS_NOT_READY"
   | "RANDOM_ROUTE_UNAVAILABLE"
+  | "NAMUWIKI_SOURCE_UNAVAILABLE"
   | "RANDOM_REROLL_LIMIT"
   | "RUN_ACCESS_DENIED"
   | "GAME_NOT_STARTED"
@@ -263,6 +286,8 @@ Deno.serve(async (request) => {
       response = await updateRoomSettings(request, path, supabase, requestId);
     } else if (request.method === "POST" && path.match(/^\/v1\/rooms\/[^/]+\/random-path$/)) {
       response = await generateRandomPath(request, path, supabase, requestId);
+    } else if (request.method === "POST" && path.match(/^\/v1\/rooms\/[^/]+\/generated-path$/)) {
+      response = await submitGeneratedRandomPath(request, path, supabase, requestId);
     } else if (request.method === "POST" && path.match(/^\/v1\/players\/[^/]+\/pairing-code$/)) {
       response = await issuePairingCode(request, path, user.id, supabase, requestId);
     } else if (request.method === "POST" && path === "/v1/extension/pair") {
@@ -731,13 +756,22 @@ async function generateRandomPath(
   try {
     generatedPath = await generateNamuWikiPath(input.difficulty);
   } catch (error) {
+    const reason = error instanceof Error ? error.message : "unknown";
     console.error(
       JSON.stringify({
         requestId,
         operation: "generate_random_path",
-        reason: error instanceof Error ? error.message : "unknown",
+        reason,
       }),
     );
+    if (reason !== "path_not_found") {
+      return errorResponse(
+        "NAMUWIKI_SOURCE_UNAVAILABLE",
+        "나무위키가 현재 경로 생성 요청에 응답하지 않습니다. 잠시 뒤 다시 시도해 주세요.",
+        requestId,
+        502,
+      );
+    }
     return errorResponse(
       "RANDOM_ROUTE_UNAVAILABLE",
       "지금은 랜덤 경로를 찾지 못했습니다. 다시 추첨해 주세요.",
@@ -775,6 +809,56 @@ async function generateRandomPath(
   return successResponse(data);
 }
 
+async function submitGeneratedRandomPath(
+  request: Request,
+  path: string,
+  supabase: SupabaseClient,
+  requestId: string,
+): Promise<Response> {
+  const pathRoomId = path.split("/")[3];
+  if (!pathRoomId || !roomIdPattern.test(pathRoomId)) {
+    return errorResponse("INVALID_REQUEST", "올바르지 않은 방 ID입니다.", requestId, 400);
+  }
+  const input = await parseCommand(request, submitGeneratedRandomPathSchema, requestId);
+  if (input instanceof Response) {
+    return input;
+  }
+  if (input.roomId !== pathRoomId) {
+    return errorResponse(
+      "INVALID_REQUEST",
+      "요청 경로와 본문의 방 ID가 일치하지 않습니다.",
+      requestId,
+      400,
+    );
+  }
+  if (
+    input.generatedPath[0]?.key !== input.startArticle.key ||
+    input.generatedPath.at(-1)?.key !== input.targetArticle.key
+  ) {
+    return errorResponse(
+      "INVALID_REQUEST",
+      "생성 경로의 시작·목표 문서가 일치하지 않습니다.",
+      requestId,
+      400,
+    );
+  }
+
+  const { data, error } = await supabase.rpc("set_random_room_path", {
+    p_room_id: input.roomId,
+    p_expected_version: input.expectedVersion,
+    p_start_article_key: input.startArticle.key,
+    p_start_article_title: input.startArticle.title,
+    p_target_article_key: input.targetArticle.key,
+    p_target_article_title: input.targetArticle.title,
+    p_generated_path: input.generatedPath,
+    p_idempotency_key: input.idempotencyKey,
+  });
+  if (error) {
+    return databaseErrorResponse(error, requestId);
+  }
+  return successResponse(data);
+}
+
 type Article = { key: string; title: string };
 type RandomDifficulty = "easy" | "normal" | "hard";
 
@@ -788,6 +872,7 @@ const RANDOM_PATH_DEPTHS: Record<RandomDifficulty, readonly number[]> = {
 
 async function generateNamuWikiPath(difficulty: RandomDifficulty): Promise<Article[]> {
   const targetDepth = pickRandom(RANDOM_PATH_DEPTHS[difficulty]);
+  let lastFailure = "path_not_found";
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
     try {
@@ -810,12 +895,13 @@ async function generateNamuWikiPath(difficulty: RandomDifficulty): Promise<Artic
       if (path.length === targetDepth + 1 && path[0].key !== path.at(-1)?.key) {
         return path;
       }
-    } catch {
+    } catch (error) {
       // 개별 문서 오류나 임시 차단은 다음 랜덤 출발지에서 다시 시도한다.
+      lastFailure = error instanceof Error ? error.message : lastFailure;
     }
   }
 
-  throw new Error("path_not_found");
+  throw new Error(lastFailure);
 }
 
 async function fetchRandomNamuWikiArticle(): Promise<Article> {
@@ -842,7 +928,7 @@ async function fetchNamuWikiLinks(article: Article): Promise<Article[]> {
   }
   const html = await response.text();
   const links = new Map<string, Article>();
-  for (const match of html.matchAll(/<a\\b[^>]*\\bhref=["']([^"']+)["'][^>]*>/gi)) {
+  for (const match of html.matchAll(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>/gi)) {
     const candidate = articleFromHref(match[1]);
     if (candidate) {
       links.set(candidate.key, candidate);
