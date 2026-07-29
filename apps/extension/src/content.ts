@@ -142,6 +142,7 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
   let lastCompletedGame: CompletedGame | undefined;
   let fairPlayEnabled = false;
   let fairPlayNoticeTimer: number | undefined;
+  let fairPlayUiRefreshTimer: number | undefined;
 
   const renderGame = () => {
     if (
@@ -284,6 +285,13 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
 
   function applyFairPlayUiBlocking(): void {
     document.documentElement.classList.toggle("wikirunner-fair-play-active", fairPlayEnabled);
+    if (!fairPlayEnabled) {
+      for (const link of document.querySelectorAll<HTMLElement>(
+        ".wikirunner-fair-play-blocked-link",
+      )) {
+        link.classList.remove("wikirunner-fair-play-blocked-link");
+      }
+    }
     const header = document.querySelector<HTMLElement>(
       "#app > div > div:first-child, body > header",
     );
@@ -313,12 +321,8 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
 
   function findFairPlaySidebars(): HTMLElement[] {
     const sidebars = new Set<HTMLElement>();
-    for (const candidate of document.querySelectorAll<HTMLElement>(
-      'aside, [role="complementary"], [class*="sidebar" i], [class*="side-bar" i]',
-    )) {
-      sidebars.add(candidate);
-    }
-
+    // Only hide the fair-play shortcuts themselves.  A broad sidebar selector
+    // can also catch advertisements or other unrelated right-rail content.
     const sidebarMarkers = ["실시간 랭킹", "실시간 검색어", "인기 문서", "최근 변경"];
     for (const marker of sidebarMarkers) {
       for (const element of document.querySelectorAll<HTMLElement>(
@@ -328,7 +332,7 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
         if (!text.includes(marker.replaceAll(/\s+/g, ""))) {
           continue;
         }
-        const sidebar = closestSidebarContainer(element);
+        const sidebar = closestSidebarCard(element, marker);
         if (sidebar) {
           sidebars.add(sidebar);
         }
@@ -337,16 +341,19 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
     return [...sidebars];
   }
 
-  function closestSidebarContainer(element: HTMLElement): HTMLElement | null {
+  function closestSidebarCard(element: HTMLElement, marker: string): HTMLElement | null {
     const article = document.querySelector("article");
+    const markerLength = marker.replaceAll(/\s+/g, "").length;
     let candidate: HTMLElement | null = element;
-    for (let depth = 0; candidate && depth < 6; depth += 1) {
+    for (let depth = 0; candidate && depth < 8; depth += 1) {
       const rect = candidate.getBoundingClientRect();
+      const textLength = (candidate.textContent ?? "").replaceAll(/\s+/g, "").length;
       if (
         !candidate.contains(article) &&
         rect.width > 120 &&
         rect.width < 520 &&
-        rect.height > 40 &&
+        rect.height >= 80 &&
+        textLength > markerLength + 2 &&
         rect.left >= window.innerWidth * 0.55
       ) {
         return candidate;
@@ -377,22 +384,46 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
     });
   }
 
-  function isBlockedFairPlayControl(target: Element): boolean {
+  function blockedFairPlayReason(target: Element): string | undefined {
     if (target.closest('input[type="search"]')) {
-      return true;
+      return "경기 중에는 문서 검색을 사용할 수 없습니다.";
     }
     const link = target.closest<HTMLAnchorElement>("a");
     if (!link) {
-      return false;
+      return undefined;
     }
     const href = link.getAttribute("href") ?? "";
     const title = link.getAttribute("title") ?? "";
-    return (
+    if (
       href === "/random" ||
       /^\/(?:Search|search)(?:[/?#]|$)/.test(href) ||
       title === "검색" ||
       title === "아무 문서로 이동"
-    );
+    ) {
+      return "경기 중에는 검색과 랜덤 문서 이동을 사용할 수 없습니다.";
+    }
+
+    let decodedHref = href;
+    try {
+      decodedHref = decodeURIComponent(href);
+    } catch {
+      // Keep the raw href when an external page supplies malformed encoding.
+    }
+    if (
+      decodedHref.startsWith("/w/분류:") ||
+      link.closest('[class*="category" i], [id*="category" i]')
+    ) {
+      return "경기 중에는 분류 링크를 사용할 수 없습니다.";
+    }
+    const article = document.querySelector("article");
+    if (
+      !link.closest("article") &&
+      (link.closest("header, nav, aside, [role='navigation'], [role='complementary']") ||
+        (article !== null && !article.contains(link)))
+    ) {
+      return "경기 중에는 본문 링크만 사용할 수 있습니다.";
+    }
+    return undefined;
   }
 
   document.addEventListener(
@@ -401,14 +432,35 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
       if (
         !fairPlayEnabled ||
         !(event.target instanceof Element) ||
-        !isBlockedFairPlayControl(event.target)
+        !blockedFairPlayReason(event.target)
       ) {
+        return;
+      }
+      const reason = blockedFairPlayReason(event.target);
+      if (!reason) {
         return;
       }
       event.preventDefault();
       event.stopImmediatePropagation();
       reportBlockedSearchAttempt();
-      showFairPlayNotice("경기 중에는 검색과 랜덤 문서 이동을 사용할 수 없습니다.");
+      showFairPlayNotice(reason);
+    },
+    { capture: true },
+  );
+
+  document.addEventListener(
+    "pointerover",
+    (event) => {
+      if (!fairPlayEnabled || !(event.target instanceof Element)) {
+        return;
+      }
+      const link = event.target.closest<HTMLAnchorElement>("a");
+      const reason = link ? blockedFairPlayReason(link) : undefined;
+      if (!link || !reason) {
+        return;
+      }
+      link.classList.add("wikirunner-fair-play-blocked-link");
+      showFairPlayNotice(reason);
     },
     { capture: true },
   );
@@ -439,23 +491,43 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
       const target = event.target instanceof Element ? event.target : null;
       const isSearchInput = target?.matches('input[type="search"]') ?? false;
       const isSearchShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k";
+      const isBrowserFindShortcut =
+        (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f";
       const isSlashShortcut =
         event.key === "/" && !target?.matches("input, textarea, [contenteditable=true]");
-      if (!isSearchInput && !isSearchShortcut && !isSlashShortcut) {
+      if (!isSearchInput && !isSearchShortcut && !isBrowserFindShortcut && !isSlashShortcut) {
         return;
       }
       event.preventDefault();
       event.stopImmediatePropagation();
       reportBlockedSearchAttempt();
-      showFairPlayNotice("경기 중에는 문서 검색 단축키를 사용할 수 없습니다.");
+      showFairPlayNotice(
+        isBrowserFindShortcut
+          ? "경기 중에는 브라우저 찾기 기능을 사용할 수 없습니다."
+          : "경기 중에는 문서 검색 단축키를 사용할 수 없습니다.",
+      );
     },
     { capture: true },
   );
 
   const fairPlayStyle = document.createElement("style");
-  fairPlayStyle.textContent = ".wikirunner-fair-play-hidden { display: none !important; }";
+  fairPlayStyle.textContent = `
+    .wikirunner-fair-play-hidden { display: none !important; }
+    .wikirunner-fair-play-blocked-link {
+      cursor: not-allowed !important;
+      text-decoration: line-through !important;
+    }
+  `;
   document.documentElement.append(fairPlayStyle);
-  new MutationObserver(() => applyFairPlayUiBlocking()).observe(document.documentElement, {
+  new MutationObserver(() => {
+    if (fairPlayUiRefreshTimer !== undefined) {
+      return;
+    }
+    fairPlayUiRefreshTimer = window.setTimeout(() => {
+      fairPlayUiRefreshTimer = undefined;
+      applyFairPlayUiBlocking();
+    }, 50);
+  }).observe(document.documentElement, {
     childList: true,
     subtree: true,
   });

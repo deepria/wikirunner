@@ -24,6 +24,7 @@ export const NAVIGATION_EVENT_TYPES = [
 ] as const;
 export const ARTICLE_SOURCES = ["host", "pool", "random"] as const;
 export const RANDOM_DIFFICULTIES = ["easy", "normal", "hard"] as const;
+export const RANKING_CRITERIA = ["moves", "time"] as const;
 
 export const roomStatusSchema = z.enum(ROOM_STATUSES);
 export const gameStatusSchema = z.enum(GAME_STATUSES);
@@ -33,6 +34,7 @@ export const violationStatusSchema = z.enum(VIOLATION_STATUSES);
 export const navigationEventTypeSchema = z.enum(NAVIGATION_EVENT_TYPES);
 export const articleSourceSchema = z.enum(ARTICLE_SOURCES);
 export const randomDifficultySchema = z.enum(RANDOM_DIFFICULTIES);
+export const rankingCriterionSchema = z.enum(RANKING_CRITERIA);
 
 export type RoomStatus = z.infer<typeof roomStatusSchema>;
 export type GameStatus = z.infer<typeof gameStatusSchema>;
@@ -42,6 +44,7 @@ export type ViolationStatus = z.infer<typeof violationStatusSchema>;
 export type NavigationEventType = z.infer<typeof navigationEventTypeSchema>;
 export type ArticleSource = z.infer<typeof articleSourceSchema>;
 export type RandomDifficulty = z.infer<typeof randomDifficultySchema>;
+export type RankingCriterion = z.infer<typeof rankingCriterionSchema>;
 
 const idSchema = z.string().uuid();
 const instantSchema = z.string().datetime({ offset: true });
@@ -89,6 +92,7 @@ export const updateRoomSettingsCommandSchema = commandMetaSchema
     startArticle: articleSchema,
     targetArticle: articleSchema,
     articleSource: articleSourceSchema,
+    rankingCriterion: rankingCriterionSchema.default("time"),
   })
   .refine((value) => value.startArticle.key !== value.targetArticle.key, {
     message: "시작 문서와 목표 문서는 달라야 합니다.",
@@ -121,6 +125,10 @@ export const disconnectExtensionCommandSchema = commandMetaSchema;
 export const setPlayerReadyCommandSchema = commandMetaSchema.extend({
   playerId: idSchema,
   ready: z.boolean(),
+});
+
+export const leaveOrKickPlayerCommandSchema = commandMetaSchema.extend({
+  playerId: idSchema,
 });
 
 export const startCountdownCommandSchema = commandMetaSchema.extend({
@@ -238,6 +246,7 @@ export const gameSummarySchema = z.object({
   scheduledAt: instantSchema,
   startArticle: articleSchema,
   targetArticle: articleSchema,
+  rankingCriterion: rankingCriterionSchema,
   generatedPath: z.array(articleSchema).min(2).nullable().optional(),
 });
 
@@ -300,6 +309,11 @@ export const abandonRunResultSchema = z.object({
   roomStatus: roomStatusSchema,
 });
 
+export const leaveOrKickPlayerResultSchema = z.object({
+  playerId: idSchema,
+  status: z.literal("left"),
+});
+
 export const navigationRouteStepSchema = z.object({
   sequence: z.number().int().positive(),
   eventType: navigationEventTypeSchema,
@@ -330,6 +344,7 @@ export const roomSnapshotSchema = z.object({
         startArticle: articleSchema,
         targetArticle: articleSchema,
         articleSource: articleSourceSchema,
+        rankingCriterion: rankingCriterionSchema,
         randomGenerationCount: z.number().int().min(0).max(10),
       })
       .nullable(),
@@ -355,6 +370,7 @@ export type IssuePairingCodeCommand = z.infer<typeof issuePairingCodeCommandSche
 export type RedeemPairingCodeCommand = z.infer<typeof redeemPairingCodeCommandSchema>;
 export type DisconnectExtensionCommand = z.infer<typeof disconnectExtensionCommandSchema>;
 export type SetPlayerReadyCommand = z.infer<typeof setPlayerReadyCommandSchema>;
+export type LeaveOrKickPlayerCommand = z.infer<typeof leaveOrKickPlayerCommandSchema>;
 export type StartCountdownCommand = z.infer<typeof startCountdownCommandSchema>;
 export type PrepareNextGameCommand = z.infer<typeof prepareNextGameCommandSchema>;
 export type EndGameCommand = z.infer<typeof endGameCommandSchema>;
@@ -379,6 +395,7 @@ export type RunSummary = z.infer<typeof runSummarySchema>;
 export type NavigationEventAck = z.infer<typeof navigationEventAckSchema>;
 export type SubmitNavigationEventsResult = z.infer<typeof submitNavigationEventsResultSchema>;
 export type AbandonRunResult = z.infer<typeof abandonRunResultSchema>;
+export type LeaveOrKickPlayerResult = z.infer<typeof leaveOrKickPlayerResultSchema>;
 export type NavigationRouteStep = z.infer<typeof navigationRouteStepSchema>;
 export type GameRoutesResult = z.infer<typeof gameRoutesResultSchema>;
 export type RoomSnapshot = z.infer<typeof roomSnapshotSchema>;

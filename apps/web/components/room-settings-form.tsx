@@ -11,6 +11,7 @@ interface RoomSettingsFormProps {
   initialStartArticle?: string;
   initialTargetArticle?: string;
   randomGenerationCount: number;
+  initialRankingCriterion?: "moves" | "time";
   onSaved: () => Promise<void>;
 }
 
@@ -22,11 +23,13 @@ export function RoomSettingsForm({
   initialStartArticle = "",
   initialTargetArticle = "",
   randomGenerationCount,
+  initialRankingCriterion = "time",
   onSaved,
 }: RoomSettingsFormProps) {
   const [startArticle, setStartArticle] = useState(initialStartArticle);
   const [targetArticle, setTargetArticle] = useState(initialTargetArticle);
   const [capacity, setCapacity] = useState(maxPlayers);
+  const [rankingCriterion, setRankingCriterion] = useState<"moves" | "time">(initialRankingCriterion);
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -44,6 +47,7 @@ export function RoomSettingsForm({
         maxPlayers: capacity,
         startArticleTitle: startArticle,
         targetArticleTitle: targetArticle,
+        rankingCriterion,
       });
       setSaved(true);
       await onSaved();
@@ -84,6 +88,12 @@ export function RoomSettingsForm({
           value={targetArticle}
           onChange={(event) => setTargetArticle(event.target.value)}
         />
+      </label>
+      <label>
+        랭킹 기준
+        <select value={rankingCriterion} onChange={(event) => setRankingCriterion(event.target.value as "moves" | "time")}>
+          <option value="moves">횟수순</option><option value="time">시간순</option>
+        </select>
       </label>
       <label>
         최대 인원

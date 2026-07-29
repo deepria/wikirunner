@@ -8,7 +8,7 @@ import { CountdownClock } from "../../../components/countdown-clock";
 import { Leaderboard } from "../../../components/leaderboard";
 import { PlayerControls } from "../../../components/player-controls";
 import { RoomSettingsForm } from "../../../components/room-settings-form";
-import { endGame, getRoomSnapshot, prepareNextGame, startCountdown } from "../../../lib/game-api";
+import { endGame, getRoomSnapshot, leaveOrKickPlayer, prepareNextGame, startCountdown } from "../../../lib/game-api";
 
 export default function RoomPage() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -19,6 +19,7 @@ export default function RoomPage() {
   const [isStarting, setIsStarting] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
   const [isPreparingNextGame, setIsPreparingNextGame] = useState(false);
+  const [isRemovingPlayerId, setIsRemovingPlayerId] = useState<string>();
 
   const loadSnapshot = useCallback(async () => {
     setIsLoading(true);
@@ -141,6 +142,24 @@ export default function RoomPage() {
     }
   }
 
+  async function handleRemovePlayer(playerId: string, isSelf: boolean) {
+    if (!snapshot || !window.confirm(isSelf ? "방에서 나갈까요?" : "이 참가자를 강퇴할까요?")) return;
+    setActionError(undefined);
+    setIsRemovingPlayerId(playerId);
+    try {
+      await leaveOrKickPlayer(playerId);
+      if (isSelf) {
+        window.location.assign("/");
+        return;
+      }
+      await loadSnapshot();
+    } catch (removeError) {
+      setActionError(removeError instanceof Error ? removeError.message : "참가자 상태를 변경하지 못했습니다.");
+    } finally {
+      setIsRemovingPlayerId(undefined);
+    }
+  }
+
   return (
     <main className="lobby-page">
       <nav aria-label="대기실 메뉴">
@@ -152,15 +171,39 @@ export default function RoomPage() {
 
       <header className="lobby-header">
         <div>
-          <p className="eyebrow">ROOM CODE</p>
+          <p className="eyebrow">WIKIRUNNER ROOM</p>
           <div className="room-code-value">
-            <h1>{snapshot.room.inviteCode}</h1>
+            <h1>대기실</h1>
+            <span className="room-code">{snapshot.room.inviteCode}</span>
             <CopyButton label="방 코드" value={snapshot.room.inviteCode} />
           </div>
-          <p>이 코드를 함께 플레이할 사람에게 공유하세요.</p>
         </div>
         <span className="room-state">{snapshot.room.status}</span>
       </header>
+
+      <section className="race-overview" aria-labelledby="race-overview-title">
+        <div className="race-overview-heading">
+          <p className="eyebrow">CURRENT RACE</p>
+          <h1 id="race-overview-title">
+            {snapshot.game?.status === "running" ? "경기 진행 중" : "시작과 목표"}
+          </h1>
+        </div>
+        {snapshot.room.draftSettings ? (
+          <div className="race-route">
+            <div>
+              <span>시작 문서</span>
+              <strong>{snapshot.room.draftSettings.startArticle.title}</strong>
+            </div>
+            <b aria-hidden="true">→</b>
+            <div>
+              <span>목표 문서</span>
+              <strong>{snapshot.room.draftSettings.targetArticle.title}</strong>
+            </div>
+          </div>
+        ) : (
+          <p className="race-empty">방장이 시작 문서와 목표 문서를 설정하면 여기에 표시됩니다.</p>
+        )}
+      </section>
 
       {snapshot.game?.status === "countdown" ? (
         <CountdownClock scheduledAt={snapshot.game.scheduledAt} />
@@ -216,6 +259,18 @@ export default function RoomPage() {
                 {player.isCurrentPlayer ? <small>나</small> : null}
                 {player.extensionConnected ? <small>확장 연결</small> : null}
                 {player.readyAt ? <small>준비됨</small> : null}
+                {snapshot.room.status === "waiting" &&
+                (player.isCurrentPlayer || isCurrentPlayerHost) &&
+                !player.isHost ? (
+                  <button
+                    className="player-remove-button"
+                    disabled={isRemovingPlayerId === player.id}
+                    type="button"
+                    onClick={() => void handleRemovePlayer(player.id, player.isCurrentPlayer)}
+                  >
+                    {isRemovingPlayerId === player.id ? "처리 중…" : player.isCurrentPlayer ? "방 나가기" : "강퇴"}
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -233,6 +288,7 @@ export default function RoomPage() {
               initialTargetArticle={snapshot.room.draftSettings?.targetArticle.title ?? ""}
               maxPlayers={snapshot.room.maxPlayers}
               randomGenerationCount={snapshot.room.draftSettings?.randomGenerationCount ?? 0}
+              initialRankingCriterion={snapshot.room.draftSettings?.rankingCriterion ?? "time"}
               roomId={snapshot.room.id}
               version={snapshot.room.version}
               onSaved={loadSnapshot}

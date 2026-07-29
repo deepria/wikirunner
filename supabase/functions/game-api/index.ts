@@ -42,6 +42,7 @@ const updateRoomSettingsSchema = commandSchema
       title: z.string().trim().min(1).max(300),
     }),
     articleSource: z.enum(["host", "pool", "random"]),
+    rankingCriterion: z.enum(["moves", "time"]).default("time"),
   })
   .refine((value) => value.startArticle.key !== value.targetArticle.key, {
     path: ["targetArticle"],
@@ -67,6 +68,7 @@ const setReadySchema = commandSchema.extend({
   playerId: z.string().uuid(),
   ready: z.boolean(),
 });
+const leaveOrKickPlayerSchema = commandSchema.extend({ playerId: z.string().uuid() });
 
 const startCountdownSchema = commandSchema.extend({
   roomId: z.string().uuid(),
@@ -166,6 +168,8 @@ type ApiErrorCode =
   | "EXTENSION_NOT_CONNECTED"
   | "EXTENSION_DISCONNECT_NOT_ALLOWED"
   | "ROOM_NOT_READYABLE"
+  | "ROOM_NOT_LEAVABLE"
+  | "HOST_CANNOT_LEAVE"
   | "ROOM_NOT_STARTABLE"
   | "NEXT_GAME_NOT_AVAILABLE"
   | "GAME_NOT_ACTIVE"
@@ -196,6 +200,7 @@ interface RoomRow {
   draft_target_article_key: string | null;
   draft_target_article_title: string | null;
   draft_article_source: "host" | "pool" | "random";
+  draft_ranking_criterion: "moves" | "time";
   draft_random_generation_count: number;
   expires_at: string;
   version: number;
@@ -220,6 +225,7 @@ interface GameRow {
   target_article_key: string;
   target_article_title: string;
   article_source: "host" | "pool" | "random";
+  ranking_criterion: "moves" | "time";
   generated_path: unknown;
 }
 
@@ -302,6 +308,8 @@ Deno.serve(async (request) => {
       response = await disconnectExtension(request, supabase, requestId);
     } else if (request.method === "PUT" && path.match(/^\/v1\/players\/[^/]+\/ready$/)) {
       response = await setPlayerReady(request, path, supabase, requestId);
+    } else if (request.method === "POST" && path.match(/^\/v1\/players\/[^/]+\/leave$/)) {
+      response = await leaveOrKickPlayer(request, path, supabase, requestId);
     } else if (request.method === "POST" && path.match(/^\/v1\/rooms\/[^/]+\/countdown$/)) {
       response = await startCountdown(request, path, supabase, requestId);
     } else if (request.method === "POST" && path.match(/^\/v1\/rooms\/[^/]+\/next-game$/)) {
@@ -501,6 +509,25 @@ async function setPlayerReady(
     return databaseErrorResponse(error, requestId);
   }
 
+  return successResponse(data);
+}
+
+async function leaveOrKickPlayer(
+  request: Request, path: string, supabase: SupabaseClient, requestId: string,
+): Promise<Response> {
+  const playerId = path.split("/")[3];
+  if (!playerId || !roomIdPattern.test(playerId)) {
+    return errorResponse("INVALID_REQUEST", "올바르지 않은 플레이어 ID입니다.", requestId, 400);
+  }
+  const input = await parseCommand(request, leaveOrKickPlayerSchema, requestId);
+  if (input instanceof Response) return input;
+  if (input.playerId !== playerId) {
+    return errorResponse("INVALID_REQUEST", "요청 경로와 본문의 플레이어 ID가 일치하지 않습니다.", requestId, 400);
+  }
+  const { data, error } = await supabase.rpc("leave_or_kick_player", {
+    p_player_id: input.playerId, p_idempotency_key: input.idempotencyKey,
+  });
+  if (error) return databaseErrorResponse(error, requestId);
   return successResponse(data);
 }
 
@@ -760,6 +787,7 @@ async function updateRoomSettings(
     p_target_article_key: input.targetArticle.key,
     p_target_article_title: input.targetArticle.title,
     p_article_source: input.articleSource,
+    p_ranking_criterion: input.rankingCriterion,
     p_idempotency_key: input.idempotencyKey,
   });
 
@@ -1080,6 +1108,7 @@ async function getRoomSnapshot(
         "draft_target_article_key",
         "draft_target_article_title",
         "draft_article_source",
+        "draft_ranking_criterion",
         "draft_random_generation_count",
         "expires_at",
         "version",
@@ -1134,7 +1163,7 @@ async function getRoomSnapshot(
     const gameResult = await supabase
       .from("games")
       .select(
-        "id,status,scheduled_at,start_article_key,start_article_title,target_article_key,target_article_title,article_source,generated_path",
+        "id,status,scheduled_at,start_article_key,start_article_title,target_article_key,target_article_title,article_source,ranking_criterion,generated_path",
       )
       .eq("id", room.current_game_id)
       .maybeSingle<GameRow>();
@@ -1188,6 +1217,7 @@ async function getRoomSnapshot(
                 title: room.draft_target_article_title,
               },
               articleSource: room.draft_article_source,
+              rankingCriterion: room.draft_ranking_criterion,
               randomGenerationCount: room.draft_random_generation_count,
             }
           : null,
@@ -1205,6 +1235,7 @@ async function getRoomSnapshot(
             key: game.target_article_key,
             title: game.target_article_title,
           },
+          rankingCriterion: game.ranking_criterion,
           generatedPath:
             (game.status === "finished" || game.status === "cancelled") &&
             game.article_source === "random"

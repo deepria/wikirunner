@@ -247,18 +247,16 @@ nav {
 
 .lobby-header {
   display: flex;
-  align-items: end;
+  align-items: center;
   justify-content: space-between;
   gap: 2rem;
-  padding: 5rem 0 3rem;
+  padding: 2rem 0 1.25rem;
 }
 
 .lobby-header h1 {
-  margin: 0.25rem 0 0;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: clamp(4rem, 12vw, 9rem);
-  letter-spacing: 0.12em;
-  line-height: 0.9;
+  margin: 0;
+  font-size: clamp(1.65rem, 4vw, 2.4rem);
+  letter-spacing: -0.06em;
 }
 
 .room-code-value,
@@ -270,7 +268,17 @@ nav {
 }
 
 .room-code-value h1 {
-  margin: 0.25rem 0 0;
+  margin: 0;
+}
+
+.room-code {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  background: rgb(255 255 255 / 56%);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 0.9rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
 }
 
 .copy-button {
@@ -324,6 +332,60 @@ nav {
   font-size: 0.75rem;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.race-overview {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.45fr) minmax(0, 1.55fr);
+  gap: clamp(1.5rem, 4vw, 4rem);
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: clamp(1.5rem, 4vw, 3rem);
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: 8px 8px 0 var(--acid);
+}
+
+.race-overview h1 {
+  margin: 0.25rem 0 0;
+  font-size: clamp(1.8rem, 4vw, 3.4rem);
+  letter-spacing: -0.07em;
+}
+
+.race-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: clamp(0.8rem, 3vw, 2rem);
+  align-items: center;
+}
+
+.race-route div {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.race-route span {
+  color: #b7bab1;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.race-route strong {
+  overflow-wrap: anywhere;
+  color: var(--acid);
+  font-size: clamp(1.35rem, 3vw, 2.3rem);
+  letter-spacing: -0.06em;
+}
+
+.race-route b {
+  color: var(--acid);
+  font-size: clamp(1.5rem, 4vw, 3rem);
+}
+
+.race-empty {
+  color: #b7bab1;
 }
 
 .lobby-grid {
@@ -698,11 +760,26 @@ nav {
   .lobby-header {
     align-items: start;
     flex-direction: column;
-    padding-top: 3rem;
+    padding-top: 1.5rem;
   }
 
   .lobby-header h1 {
-    font-size: clamp(3.5rem, 18vw, 6rem);
+    font-size: 1.8rem;
+  }
+
+  .race-overview {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+    padding: 1.5rem;
+  }
+
+  .race-route {
+    grid-template-columns: 1fr;
+    gap: 0.9rem;
+  }
+
+  .race-route b {
+    transform: rotate(90deg);
   }
 
   .lobby-grid {

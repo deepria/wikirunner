@@ -9,6 +9,8 @@ import {
   type GameRoutesResult,
   gameRoutesResultSchema,
   type PairingCodeResult,
+  type LeaveOrKickPlayerResult,
+  leaveOrKickPlayerResultSchema,
   type PrepareNextGameResult,
   pairingCodeResultSchema,
   prepareNextGameResultSchema,
@@ -82,6 +84,7 @@ export async function updateRoomSettings(input: {
   maxPlayers: number;
   startArticleTitle: string;
   targetArticleTitle: string;
+  rankingCriterion: "moves" | "time";
 }): Promise<RoomSettingsResult> {
   const idempotencyKey = crypto.randomUUID();
   const startArticleTitle = input.startArticleTitle.trim().normalize("NFC");
@@ -103,6 +106,7 @@ export async function updateRoomSettings(input: {
         title: targetArticleTitle,
       },
       articleSource: "host",
+      rankingCriterion: input.rankingCriterion,
     }),
     headers: {
       "Content-Type": "application/json",
@@ -145,6 +149,16 @@ export async function setPlayerReady(playerId: string, ready: boolean): Promise<
     },
   });
   return serverEnvelopeSchema(readyResultSchema).parse(envelope).data;
+}
+
+export async function leaveOrKickPlayer(playerId: string): Promise<LeaveOrKickPlayerResult> {
+  const idempotencyKey = crypto.randomUUID();
+  const envelope = await gameApiFetch(`/v1/players/${playerId}/leave`, {
+    method: "POST",
+    body: JSON.stringify({ schemaVersion: 1, idempotencyKey, playerId }),
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+  });
+  return serverEnvelopeSchema(leaveOrKickPlayerResultSchema).parse(envelope).data;
 }
 
 export async function startCountdown(

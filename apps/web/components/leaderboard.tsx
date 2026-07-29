@@ -42,17 +42,22 @@ export function Leaderboard({ game, runs }: LeaderboardProps) {
           <p className="eyebrow">LIVE RESULT</p>
           <h2>실시간 경기 현황</h2>
         </div>
-        <span>{game.targetArticle.title} 도착 순</span>
+        <span>{game.rankingCriterion === "moves" ? "이동 횟수순" : "완주 시간순"}</span>
       </div>
       <ol className="leaderboard-list">
-        {runs.map((run) => {
+        {[...runs].sort((left, right) => {
+          if (left.rank !== null && right.rank !== null) return left.rank - right.rank;
+          if (left.rank !== null) return -1;
+          if (right.rank !== null) return 1;
+          return 0;
+        }).map((run) => {
           const route = routesByRun[run.id];
           return (
             <li key={run.id}>
               <strong>{run.rank ? `${run.rank}위` : runStatusLabel(run.status)}</strong>
               <span>{run.nickname}</span>
-              <span>{run.moveCount ?? 0}회</span>
-              <span>{run.durationMs === null ? run.status : formatDuration(run.durationMs)}</span>
+              <span>{game.rankingCriterion === "moves" ? `${run.moveCount ?? 0}회` : run.durationMs === null ? run.status : formatDuration(run.durationMs)}</span>
+              <span>{game.rankingCriterion === "moves" ? (run.durationMs === null ? run.status : formatDuration(run.durationMs)) : `${run.moveCount ?? 0}회`}</span>
               {run.violationStatus === "warned" ? <small>경고 확인 필요</small> : <span />}
               <details
                 className="route-details"
