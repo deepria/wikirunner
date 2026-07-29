@@ -117,7 +117,7 @@ export default function PrivacyPage() {
         <section>
           <h2>7. 문의 및 방침 변경</h2>
           <p>
-            개인정보 관련 문의 또는 삭제 요청은 <strong>지원 이메일 주소를 입력하세요</strong>로
+            개인정보 관련 문의 또는 삭제 요청은 <strong>diajint_823@naver.com</strong>로
             보내 주세요. 방침이 변경되면 이 페이지의 시행일을 갱신해 알립니다.
           </p>
           <p className="privacy-note">

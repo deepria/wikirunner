@@ -48,6 +48,10 @@ export default function Home() {
           </li>
         </ol>
       </section>
+
+      <footer className="site-footer">
+        <a href="/privacy">개인정보처리방침</a>
+      </footer>
     </main>
   );
 }
