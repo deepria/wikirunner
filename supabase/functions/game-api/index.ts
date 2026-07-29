@@ -1137,11 +1137,16 @@ async function getRoomSnapshot(
   }
 
   const playerIds = (playersResult.data ?? []).map((player) => player.id);
+  const { data: authData, error: authLookupError } = await supabase.auth.getUser();
+  if (authLookupError || !authData.user) {
+    return errorResponse("AUTH_REQUIRED", "인증 세션이 유효하지 않습니다.", requestId, 401);
+  }
   const identitiesResult =
     playerIds.length > 0
       ? await supabase
           .from("player_identities")
           .select("player_id")
+          .eq("auth_user_id", authData.user.id)
           .in("player_id", playerIds)
           .limit(1)
           .maybeSingle()
