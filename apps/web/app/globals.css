@@ -167,6 +167,87 @@ nav {
   padding-top: 2rem;
 }
 
+.privacy-page {
+  min-height: 100vh;
+}
+
+.privacy-home-link {
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.privacy-home-link:hover,
+.privacy-home-link:focus-visible {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.25rem;
+}
+
+.privacy-content {
+  width: min(100%, 52rem);
+  margin: clamp(3rem, 9vw, 7rem) auto;
+  padding: clamp(1.5rem, 5vw, 4rem);
+  border: 1px solid var(--ink);
+  background: rgb(255 255 255 / 46%);
+  box-shadow: 8px 8px 0 var(--acid);
+  line-height: 1.75;
+  word-break: keep-all;
+}
+
+.privacy-heading {
+  padding-bottom: 2.25rem;
+  border-bottom: 1px solid var(--ink);
+}
+
+.privacy-heading h1 {
+  margin: 0.5rem 0;
+  font-size: clamp(2.7rem, 7vw, 5rem);
+  letter-spacing: -0.08em;
+  line-height: 0.95;
+}
+
+.privacy-heading p:last-child,
+.privacy-content > p,
+.privacy-content section > p {
+  color: var(--muted);
+}
+
+.privacy-content section {
+  padding: 2rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.privacy-content section:last-child {
+  border-bottom: 0;
+}
+
+.privacy-content h2 {
+  margin: 0 0 0.85rem;
+  font-size: clamp(1.35rem, 3vw, 1.75rem);
+  letter-spacing: -0.045em;
+}
+
+.privacy-content ul {
+  display: grid;
+  gap: 0.7rem;
+  padding-left: 1.25rem;
+}
+
+.privacy-content a:not(.brand) {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.2rem;
+}
+
+.privacy-note {
+  margin-bottom: 0;
+  padding: 0.85rem 1rem;
+  border-left: 4px solid var(--acid);
+  background: rgb(217 255 67 / 20%);
+  color: var(--ink) !important;
+  font-size: 0.9rem;
+}
+
 .form-card {
   width: min(100%, 34rem);
   margin-inline: auto;

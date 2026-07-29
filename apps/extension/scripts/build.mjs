@@ -28,7 +28,7 @@ async function buildEntry({
           format,
         },
       },
-      sourcemap: true,
+      sourcemap: false,
       watch: watch ? {} : null,
     },
   });

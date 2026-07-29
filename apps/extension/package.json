@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "package": "pnpm build && rm -f wikirunner-extension.zip && cd dist && zip -r ../wikirunner-extension.zip . -x '*.DS_Store'",
     "dev": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit"
   },

@@ -3,11 +3,16 @@
   "name": "WikiRunner",
   "description": "나무위키 내부 링크 스피드런을 기록합니다.",
   "version": "0.1.23",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "permissions": ["alarms", "declarativeNetRequest", "storage", "tabs", "webNavigation"],
   "host_permissions": [
     "https://namu.wiki/*",
-    "https://*.supabase.co/*",
-    "http://127.0.0.1:54321/*"
+    "https://*.supabase.co/*"
   ],
   "background": {
     "service_worker": "assets/service-worker.js",
