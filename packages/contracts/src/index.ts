@@ -246,7 +246,7 @@ export const gameSummarySchema = z.object({
   scheduledAt: instantSchema,
   startArticle: articleSchema,
   targetArticle: articleSchema,
-  rankingCriterion: rankingCriterionSchema,
+  rankingCriterion: rankingCriterionSchema.default("time"),
   generatedPath: z.array(articleSchema).min(2).nullable().optional(),
 });
 
@@ -344,7 +344,7 @@ export const roomSnapshotSchema = z.object({
         startArticle: articleSchema,
         targetArticle: articleSchema,
         articleSource: articleSourceSchema,
-        rankingCriterion: rankingCriterionSchema,
+        rankingCriterion: rankingCriterionSchema.default("time"),
         randomGenerationCount: z.number().int().min(0).max(10),
       })
       .nullable(),

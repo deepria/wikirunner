@@ -326,7 +326,7 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
     const sidebarMarkers = ["실시간 랭킹", "실시간 검색어", "인기 문서", "최근 변경"];
     for (const marker of sidebarMarkers) {
       for (const element of document.querySelectorAll<HTMLElement>(
-        "a, span, strong, h2, h3, div",
+        "a, span, strong, p, li, h1, h2, h3, h4, h5, h6, div",
       )) {
         const text = element.textContent?.replaceAll(/\s+/g, "") ?? "";
         if (!text.includes(marker.replaceAll(/\s+/g, ""))) {

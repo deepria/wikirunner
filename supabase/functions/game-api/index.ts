@@ -1235,7 +1235,7 @@ async function getRoomSnapshot(
             key: game.target_article_key,
             title: game.target_article_title,
           },
-          rankingCriterion: game.ranking_criterion,
+          rankingCriterion: game.ranking_criterion ?? "time",
           generatedPath:
             (game.status === "finished" || game.status === "cancelled") &&
             game.article_source === "random"
