@@ -107,6 +107,59 @@ nav {
   box-shadow: 4px 4px 0 var(--ink);
 }
 
+.extension-link {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.9rem;
+  width: min(100%, 31rem);
+  align-items: center;
+  margin-top: 2.5rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--ink);
+  background: rgb(255 255 255 / 52%);
+  box-shadow: 5px 5px 0 var(--acid);
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.extension-link > span:first-child {
+  display: grid;
+  width: 2.4rem;
+  height: 2.4rem;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--acid);
+  font-size: 1.1rem;
+}
+
+.extension-link strong,
+.extension-link small {
+  display: block;
+}
+
+.extension-link strong {
+  font-size: 0.95rem;
+}
+
+.extension-link small {
+  margin-top: 0.15rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.extension-link > b {
+  font-size: 1.2rem;
+}
+
+.extension-link:hover,
+.extension-link:focus-visible {
+  transform: translate(-3px, -3px);
+  box-shadow: 8px 8px 0 var(--ink);
+}
+
 .primary {
   background: var(--acid);
 }
@@ -421,6 +474,47 @@ nav {
 
 .lobby-header p {
   color: var(--muted);
+}
+
+.extension-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  margin-bottom: 2rem;
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border: 1px solid var(--ink);
+  background: var(--acid);
+}
+
+.extension-callout h2 {
+  margin: 0.3rem 0 0;
+  font-size: clamp(1.35rem, 3vw, 2rem);
+  letter-spacing: -0.055em;
+}
+
+.extension-callout p:not(.eyebrow) {
+  margin: 0.5rem 0 0;
+  color: var(--ink);
+}
+
+.extension-callout a {
+  flex: 0 0 auto;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 0.88rem;
+  font-weight: 800;
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.extension-callout a:hover,
+.extension-callout a:focus-visible {
+  transform: translate(-3px, -3px);
+  box-shadow: 4px 4px 0 rgb(255 255 255 / 65%);
 }
 
 .room-state {
@@ -863,6 +957,16 @@ nav {
 
   .lobby-header h1 {
     font-size: 1.8rem;
+  }
+
+  .extension-callout {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .extension-callout a {
+    text-align: center;
   }
 
   .race-overview {

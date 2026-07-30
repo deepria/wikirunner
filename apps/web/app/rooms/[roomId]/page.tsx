@@ -181,6 +181,21 @@ export default function RoomPage() {
         <span className="room-state">{snapshot.room.status}</span>
       </header>
 
+      <section className="extension-callout" aria-label="Chrome 확장프로그램 설치 안내">
+        <div>
+          <p className="eyebrow">BEFORE YOU RUN</p>
+          <h2>경기 전에 확장프로그램을 연결하세요.</h2>
+          <p>참가자 전원이 설치하고 페어링 코드를 입력하면 준비할 수 있습니다.</p>
+        </div>
+        <a
+          href="https://chromewebstore.google.com/detail/bfloccbccjcdlpdmfgmelnicnohagbfi?utm_source=item-share-cb"
+          rel="noreferrer"
+          target="_blank"
+        >
+          Chrome 웹 스토어에서 설치 <span aria-hidden="true">↗</span>
+        </a>
+      </section>
+
       <section className="race-overview" aria-labelledby="race-overview-title">
         <div className="race-overview-heading">
           <p className="eyebrow">CURRENT RACE</p>

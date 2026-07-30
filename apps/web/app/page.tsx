@@ -26,6 +26,20 @@ export default function Home() {
             방 코드로 입장
           </a>
         </div>
+
+        <a
+          className="extension-link"
+          href="https://chromewebstore.google.com/detail/bfloccbccjcdlpdmfgmelnicnohagbfi?utm_source=item-share-cb"
+          rel="noreferrer"
+          target="_blank"
+        >
+          <span aria-hidden="true">✦</span>
+          <span>
+            <strong>Chrome 확장프로그램 설치</strong>
+            <small>경기 기록과 공정 플레이를 위해 필요해요</small>
+          </span>
+          <b aria-hidden="true">↗</b>
+        </a>
       </section>
 
       <section className="rule-card" aria-labelledby="rules-title">
