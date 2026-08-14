@@ -13,6 +13,6 @@ window.addEventListener("message", (event) => {
   }
   if (message.type !== "WIKIRUNNER_AUTO_PAIR_REQUEST" || typeof message.nonce !== "string") return;
   void chrome.runtime.sendMessage({ type: "REDEEM_AUTO_PAIRING_NONCE", nonce: message.nonce }).then((response: unknown) => {
-    window.postMessage({ type: "WIKIRUNNER_AUTO_PAIR_RESULT", ok: response !== null && typeof response === "object" && (response as { ok?: unknown }).ok === true, message: response !== null && typeof response === "object" ? (response as { message?: unknown }).message : undefined }, window.location.origin);
+    window.postMessage({ type: "WIKIRUNNER_AUTO_PAIR_RESULT", nonce: message.nonce, ok: response !== null && typeof response === "object" && (response as { ok?: unknown }).ok === true, message: response !== null && typeof response === "object" ? (response as { message?: unknown }).message : undefined }, window.location.origin);
   });
 });

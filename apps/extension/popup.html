@@ -5,159 +5,79 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WikiRunner</title>
     <style>
-      body {
-        width: 300px;
-        margin: 0;
-        padding: 20px;
-        color: #191b1a;
-        background: #f4f1e8;
-        font-family: Arial, "Apple SD Gothic Neo", sans-serif;
-      }
-      h1 {
-        margin: 0;
-        font-size: 22px;
-        letter-spacing: -1px;
-      }
-      p {
-        color: #686b66;
-        line-height: 1.5;
-      }
-      .badge {
-        display: inline-block;
-        padding: 6px 8px;
-        border: 1px solid #191b1a;
-        background: #d9ff43;
-        font-size: 12px;
-        font-weight: 800;
-      }
-      form {
-        display: grid;
-        gap: 10px;
-        margin-top: 16px;
-      }
-      .game-controls {
-        display: grid;
-        gap: 8px;
-        margin-top: 16px;
-        padding-top: 16px;
-        border-top: 1px solid #c9c8bf;
-      }
-      .connection-controls {
-        display: grid;
-        gap: 8px;
-        margin-top: 16px;
-        padding-top: 16px;
-        border-top: 1px solid #c9c8bf;
-      }
-      .web-controls {
-        display: grid;
-        gap: 8px;
-        margin-top: 16px;
-        padding-top: 16px;
-        border-top: 1px solid #c9c8bf;
-      }
-      label {
-        display: grid;
-        gap: 6px;
-        font-size: 12px;
-        font-weight: 800;
-      }
-      input,
-      select,
-      button {
-        min-height: 40px;
-        border: 1px solid #191b1a;
-        border-radius: 0;
-        font: inherit;
-      }
-      input {
-        padding: 0 10px;
-        background: #fffef8;
-        font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-        font-size: 16px;
-        font-weight: 800;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-      }
-      select {
-        padding: 0 10px;
-        background: #fffef8;
-      }
-      button {
-        background: #d9ff43;
-        font-weight: 800;
-        cursor: pointer;
-      }
-      button:disabled {
-        background: #c9c8bf;
-        color: #686b66;
-        cursor: default;
-      }
-      .danger {
-        color: #fff;
-        background: #a32314;
-      }
-      .secondary {
-        background: transparent;
-      }
-      .error {
-        color: #a32314;
-        font-size: 12px;
-        font-weight: 700;
-      }
-      [hidden] {
-        display: none;
-      }
+      :root { color: #1a1d1a; background: #f5f3eb; font-family: Arial, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+      * { box-sizing: border-box; }
+      body { width: 352px; margin: 0; padding: 14px; }
+      button, input, select { font: inherit; }
+      button { min-height: 42px; border: 1px solid #1a1d1a; border-radius: 10px; background: #d9ff43; color: #1a1d1a; font-weight: 800; cursor: pointer; transition: transform 120ms ease, background 120ms ease; }
+      button:hover:not(:disabled) { transform: translateY(-1px); background: #c9ee35; }
+      button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #4578e8; outline-offset: 2px; }
+      button:disabled { border-color: #c9c9c1; background: #deded8; color: #777a74; cursor: default; }
+      .app-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 2px 14px; }
+      .brand { display: flex; align-items: center; gap: 9px; font-size: 20px; font-weight: 900; letter-spacing: -1px; }
+      .brand-mark { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid #1a1d1a; border-radius: 8px; background: #d9ff43; font-size: 15px; }
+      .version-label { color: #6d7069; font-size: 11px; font-weight: 800; }
+      .status-card { display: grid; grid-template-columns: auto 1fr; gap: 11px; align-items: center; min-height: 82px; padding: 13px; border: 1px solid #1a1d1a; border-radius: 14px; background: #fffef9; box-shadow: 3px 3px 0 #1a1d1a; }
+      .status-dot { width: 12px; height: 12px; border: 1px solid #1a1d1a; border-radius: 50%; background: #b8bbb4; }
+      .status-card[data-state="connected"] .status-dot { background: #70c86b; }
+      .status-card[data-state="playing"] .status-dot { background: #d9ff43; box-shadow: 0 0 0 4px #ecf7b9; }
+      .status-card[data-state="disconnected"] .status-dot { background: #e5a096; }
+      .status-copy { min-width: 0; }
+      .status-label { display: block; margin-bottom: 3px; font-size: 13px; font-weight: 900; }
+      .status-description { margin: 0; overflow: hidden; color: #62665f; font-size: 12px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+      .content { display: grid; gap: 10px; margin-top: 16px; }
+      .panel { display: grid; gap: 10px; padding: 13px; border: 1px solid #d1d1c8; border-radius: 12px; background: #fffef9; }
+      .panel-title { margin: 0; color: #555950; font-size: 11px; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; }
+      .panel-copy { margin: -3px 0 0; color: #6d7069; font-size: 12px; line-height: 1.45; }
+      form { display: grid; gap: 10px; }
+      label { display: grid; gap: 6px; color: #373b36; font-size: 12px; font-weight: 800; }
+      input, select { width: 100%; min-height: 42px; border: 1px solid #9b9e96; border-radius: 9px; background: #fffef9; color: #1a1d1a; }
+      input { padding: 0 11px; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 16px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+      select { padding: 0 10px; }
+      .button-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .secondary { background: #fffef9; }
+      .secondary:hover:not(:disabled) { background: #efeee5; }
+      .danger { border-color: #a32314; background: #a32314; color: #fff; }
+      .danger:hover:not(:disabled) { background: #841b0e; }
+      .error { min-height: 0; margin: 0; color: #a32314; font-size: 12px; font-weight: 700; line-height: 1.4; }
+      .danger-panel { border-color: #e4bbb5; background: #fff8f6; }
+      .footer { margin: 2px 2px 0; color: #797c75; font-size: 11px; line-height: 1.45; }
+      [hidden] { display: none !important; }
     </style>
   </head>
   <body>
-    <h1>WikiRunner</h1>
-    <p id="description">확장 프로그램 상태를 확인하는 중입니다.</p>
-    <span class="badge" id="status">확인 중</span>
-    <form id="pairing-form" hidden>
-      <label>
-        페어링 코드
-        <input
-          id="pairing-code"
-          required
-          autocomplete="off"
-          maxlength="9"
-          placeholder="ABCD-EFGH"
-        />
-      </label>
-      <button id="pairing-button" type="submit">웹 계정과 연결</button>
-      <p class="error" id="pairing-error" role="alert"></p>
-    </form>
-    <section class="game-controls" id="game-controls" hidden>
-      <button class="danger" id="abandon-button" type="button">이번 경기 포기</button>
-      <p class="error" id="abandon-error" role="alert"></p>
+    <header class="app-header">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">W</span>WikiRunner</div>
+      <span class="version-label">EXTENSION</span>
+    </header>
+    <section class="status-card" id="status-card" data-state="checking" aria-live="polite">
+      <span class="status-dot" aria-hidden="true"></span>
+      <div class="status-copy">
+        <strong class="status-label" id="status">상태 확인 중</strong>
+        <p class="status-description" id="description">확장 프로그램 상태를 확인하는 중입니다.</p>
+      </div>
     </section>
-    <section class="connection-controls" id="overlay-restore-controls" hidden>
-      <button class="secondary" id="show-overlay-button" type="button">경기 오버레이 다시 표시</button>
-    </section>
-    <section class="connection-controls" id="connection-controls" hidden>
-      <button class="secondary" id="disconnect-button" type="button">연동 해제</button>
-      <p class="error" id="disconnect-error" role="alert"></p>
-    </section>
-    <section class="connection-controls" id="random-path-controls" hidden>
-      <label>
-        방장 랜덤 난이도
-        <select id="random-difficulty">
-          <option value="easy">쉬움 · 3~4단계</option>
-          <option value="normal">보통 · 5~6단계</option>
-          <option value="hard">어려움 · 7~8단계</option>
-        </select>
-      </label>
-      <button class="secondary" id="generate-random-path-button" type="button">
-        랜덤 시작·목표 추첨
-      </button>
-      <p class="error" id="random-path-error" role="alert"></p>
-    </section>
-    <section class="web-controls" id="web-controls">
-      <button class="secondary" id="open-home-button" type="button">웹 메인으로 이동</button>
-      <button class="secondary" id="open-room-button" type="button">현재 방으로 이동</button>
-      <p class="error" id="web-navigation-error" role="alert"></p>
-    </section>
+    <main class="content">
+      <section class="panel" id="pairing-form" hidden>
+        <h2 class="panel-title">웹 계정 연결</h2><p class="panel-copy">웹 대기실에서 발급한 코드를 입력하세요.</p>
+        <form id="pairing-code-form"><label>페어링 코드<input id="pairing-code" required autocomplete="off" maxlength="9" placeholder="ABCD-EFGH" /></label><button id="pairing-button" type="submit">계정 연결하기</button><p class="error" id="pairing-error" role="alert"></p></form>
+      </section>
+      <section class="panel danger-panel" id="game-controls" hidden>
+        <h2 class="panel-title">진행 중인 경기</h2><button class="danger" id="abandon-button" type="button">이번 경기 포기</button><p class="error" id="abandon-error" role="alert"></p>
+      </section>
+      <section class="panel" id="overlay-restore-controls" hidden>
+        <h2 class="panel-title">경기 오버레이</h2><p class="panel-copy">숨긴 오버레이를 현재 탭에 다시 표시합니다.</p><button class="secondary" id="show-overlay-button" type="button">오버레이 다시 표시</button>
+      </section>
+      <section class="panel" id="random-path-controls" hidden>
+        <h2 class="panel-title">방장 도구</h2><label>랜덤 경로 난이도<select id="random-difficulty"><option value="easy">쉬움 · 3~4단계</option><option value="normal">보통 · 5~6단계</option><option value="hard">어려움 · 7~8단계</option></select></label><button class="secondary" id="generate-random-path-button" type="button">랜덤 시작·목표 추첨</button><p class="error" id="random-path-error" role="alert"></p>
+      </section>
+      <section class="panel" id="web-controls">
+        <h2 class="panel-title">대기실</h2><div class="button-row"><button class="secondary" id="open-room-button" type="button">현재 방 열기</button><button class="secondary" id="open-home-button" type="button">웹 메인</button></div><p class="error" id="web-navigation-error" role="alert"></p>
+      </section>
+      <section class="panel" id="connection-controls" hidden>
+        <h2 class="panel-title">연결 관리</h2><button class="secondary" id="disconnect-button" type="button">연동 해제</button><p class="error" id="disconnect-error" role="alert"></p>
+      </section>
+    </main>
     <script type="module" src="/src/popup.ts"></script>
   </body>
 </html>

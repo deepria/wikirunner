@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
   },
   reactStrictMode: true,
   transpilePackages: ["@wikirunner/contracts"],
+  outputFileTracingRoot: resolve(import.meta.dirname, "../.."),
   turbopack: {
     root: resolve(import.meta.dirname, "../.."),
   },

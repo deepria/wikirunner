@@ -74,6 +74,9 @@ export default function RoomPage() {
 
   const currentPlayer = snapshot.players.find((player) => player.isCurrentPlayer);
   const isCurrentPlayerHost = currentPlayer?.id === snapshot.room.hostPlayerId;
+  const readyPlayerCount = snapshot.players.filter(
+    (player) => player.extensionConnected && player.readyAt !== null,
+  ).length;
   const canStart =
     isCurrentPlayerHost &&
     snapshot.room.status === "waiting" &&
@@ -167,7 +170,7 @@ export default function RoomPage() {
         <a className="brand" href="/">
           WikiRunner
         </a>
-        <span className="status">{currentPlayer?.nickname ?? "참가자"} 님 · 접속 중</span>
+        <span className="status">{currentPlayer?.nickname ?? "참가자"} · {roomStatusLabel(snapshot.room.status)}</span>
       </nav>
 
       <header className="lobby-header">
@@ -175,27 +178,27 @@ export default function RoomPage() {
           <p className="eyebrow">WIKIRUNNER ROOM</p>
           <div className="room-code-value">
             <h1>대기실</h1>
+            <span className="room-code-label">초대 코드</span>
             <span className="room-code">{snapshot.room.inviteCode}</span>
             <CopyButton label="방 코드" value={snapshot.room.inviteCode} />
           </div>
         </div>
-        <span className="room-state">{snapshot.room.status}</span>
+        <span className="room-state">{roomStatusLabel(snapshot.room.status)}</span>
       </header>
 
-      <section className="extension-callout" aria-label="Chrome 확장프로그램 설치 안내">
-        <div>
-          <p className="eyebrow">BEFORE YOU RUN</p>
-          <h2>경기 전에 확장프로그램을 연결하세요.</h2>
-          <p>참가자 전원이 설치하고 페어링 코드를 입력하면 준비할 수 있습니다.</p>
-        </div>
+      {snapshot.room.status === "waiting" && !currentPlayer?.extensionConnected ? (
+      <section className="extension-banner" aria-label="Chrome 확장프로그램 설치 안내">
+        <span aria-hidden="true" className="extension-banner-mark">!</span>
+        <p><strong>확장 프로그램 연결이 필요합니다.</strong></p>
         <a
           href="https://chromewebstore.google.com/detail/bfloccbccjcdlpdmfgmelnicnohagbfi?utm_source=item-share-cb"
           rel="noreferrer"
           target="_blank"
         >
-          Chrome 웹 스토어에서 설치 <span aria-hidden="true">↗</span>
+          설치하기 <span aria-hidden="true">↗</span>
         </a>
       </section>
+      ) : null}
 
       <section className="race-overview" aria-labelledby="race-overview-title">
         <div className="race-overview-heading">
@@ -258,43 +261,15 @@ export default function RoomPage() {
         />
       ) : null}
 
-      <section className="lobby-grid">
-        <article className="lobby-card">
+      <section className={isCurrentPlayerHost ? "lobby-grid" : "lobby-grid lobby-grid-player-only"}>
+        {isCurrentPlayerHost ? (
+        <article className="lobby-card settings-card">
           <div className="card-heading">
-            <h2>참가자</h2>
-            <span>
-              {snapshot.players.length}/{snapshot.room.maxPlayers}
-            </span>
-          </div>
-          <ul className="player-list">
-            {snapshot.players.map((player) => (
-              <li key={player.id}>
-                <span aria-hidden="true" className="presence" title={player.connectionStatus} />
-                <strong>{player.nickname}</strong>
-                {player.isHost ? <small>방장</small> : null}
-                {player.isCurrentPlayer ? <small>나</small> : null}
-                {player.extensionConnected ? <small>확장 연결</small> : null}
-                {player.readyAt ? <small>준비됨</small> : null}
-                {snapshot.room.status === "waiting" &&
-                (player.isCurrentPlayer || isCurrentPlayerHost) &&
-                !player.isHost ? (
-                  <button
-                    className="player-remove-button"
-                    disabled={isRemovingPlayerId === player.id}
-                    type="button"
-                    onClick={() => void handleRemovePlayer(player.id, player.isCurrentPlayer)}
-                  >
-                    {isRemovingPlayerId === player.id ? "처리 중…" : player.isCurrentPlayer ? "방 나가기" : "강퇴"}
-                  </button>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </article>
-
-        <article className="lobby-card">
-          <div className="card-heading">
-            <h2>경기 설정</h2>
+            <div>
+              <p className="eyebrow">RACE SETUP</p>
+              <h2>경기 설정</h2>
+            </div>
+            {isCurrentPlayerHost ? <span>방장</span> : null}
           </div>
           {isCurrentPlayerHost && snapshot.room.status === "waiting" ? (
             <RoomSettingsForm
@@ -317,10 +292,47 @@ export default function RoomPage() {
               <dd>{snapshot.room.draftSettings.targetArticle.title}</dd>
             </dl>
           ) : (
-            <p className="empty-message">
-              방장이 시작 문서와 목표 문서를 정하면 이곳에 표시됩니다.
-            </p>
+            <p className="empty-message">방장이 시작 문서와 목표 문서를 정하면 이곳에 표시됩니다.</p>
           )}
+        </article>
+        ) : null}
+
+        <article className="lobby-card participants-card">
+          <div className="card-heading">
+            <div>
+              <p className="eyebrow">PLAYERS</p>
+              <h2>참가자</h2>
+            </div>
+            <span>
+              {snapshot.players.length}/{snapshot.room.maxPlayers}
+            </span>
+          </div>
+          <ul className="player-list">
+            {snapshot.players.map((player) => (
+              <li key={player.id}>
+                <span aria-hidden="true" className="presence" title={player.connectionStatus} />
+                <div className="player-name">
+                  <strong>{player.nickname}</strong>
+                  <span>{playerMetaLabel(player)}</span>
+                </div>
+                <span className={player.readyAt && player.extensionConnected ? "player-readiness is-ready" : "player-readiness"}>
+                  {player.readyAt && player.extensionConnected ? "준비 완료" : player.extensionConnected ? "준비 필요" : "연결 필요"}
+                </span>
+                {snapshot.room.status === "waiting" &&
+                (player.isCurrentPlayer || isCurrentPlayerHost) &&
+                !player.isHost ? (
+                  <button
+                    className="player-remove-button"
+                    disabled={isRemovingPlayerId === player.id}
+                    type="button"
+                    onClick={() => void handleRemovePlayer(player.id, player.isCurrentPlayer)}
+                  >
+                    {isRemovingPlayerId === player.id ? "처리 중…" : player.isCurrentPlayer ? "방 나가기" : "강퇴"}
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         </article>
       </section>
 
@@ -332,8 +344,8 @@ export default function RoomPage() {
         <section className="start-panel">
           <div>
             <p className="eyebrow">HOST CONTROL</p>
-            <h2>모두 준비됐나요?</h2>
-            <p>시작하면 서버 시각 기준 10초 카운트다운이 진행됩니다.</p>
+            <h2>{readyPlayerCount}/{snapshot.players.length}명 준비 완료</h2>
+            <p>{canStart ? "모두 준비됐습니다. 시작하면 서버 시각 기준 10초 카운트다운이 진행됩니다." : "전원이 확장을 연결하고 준비를 완료하면 시작할 수 있습니다."}</p>
           </div>
           <button disabled={!canStart || isStarting} type="button" onClick={handleStartCountdown}>
             {isStarting ? "시작 준비 중…" : "10초 카운트다운 시작"}
@@ -367,4 +379,13 @@ export default function RoomPage() {
       ) : null}
     </main>
   );
+}
+
+function roomStatusLabel(status: RoomSnapshot["room"]["status"]): string {
+  return { waiting: "대기 중", countdown: "카운트다운", running: "경기 중", finished: "결과 확인", closed: "종료됨" }[status];
+}
+
+function playerMetaLabel(player: RoomSnapshot["players"][number]): string {
+  if (player.isHost) return player.isCurrentPlayer ? "방장 · 나" : "방장";
+  return player.isCurrentPlayer ? "나" : "참가자";
 }

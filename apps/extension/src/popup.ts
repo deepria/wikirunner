@@ -2,7 +2,9 @@ import { abandonRun, getExtensionSnapshot, pairExtension } from "./game-api";
 
 const statusElement = document.querySelector<HTMLElement>("#status");
 const description = document.querySelector<HTMLElement>("#description");
-const pairingForm = document.querySelector<HTMLFormElement>("#pairing-form");
+const statusCard = document.querySelector<HTMLElement>("#status-card");
+const pairingPanel = document.querySelector<HTMLElement>("#pairing-form");
+const pairingForm = document.querySelector<HTMLFormElement>("#pairing-code-form");
 const pairingInput = document.querySelector<HTMLInputElement>("#pairing-code");
 const pairingButton = document.querySelector<HTMLButtonElement>("#pairing-button");
 const pairingError = document.querySelector<HTMLElement>("#pairing-error");
@@ -234,7 +236,7 @@ async function renderConnectionState() {
   if (
     !statusElement ||
     !description ||
-    !pairingForm ||
+    !pairingPanel ||
     !gameControls ||
     !connectionControls ||
     !disconnectButton ||
@@ -256,6 +258,7 @@ async function renderConnectionState() {
     await updateRandomPathControls(activeRoomId, activeGame, activeRun);
     if (isActiveGame(activeGame) && isActiveRun(activeRun)) {
       statusElement.textContent = "경기 중";
+      statusCard?.setAttribute("data-state", "playing");
       description.textContent = `목표: ${activeGame.targetArticleTitle}`;
       gameControls.hidden = false;
       await updateOverlayControl();
@@ -263,11 +266,12 @@ async function renderConnectionState() {
       disconnectButton.title = "경기를 포기한 뒤 연동을 해제할 수 있습니다.";
     } else {
       statusElement.textContent = "연결됨";
+      statusCard?.setAttribute("data-state", "connected");
       description.textContent = isGameOutcome(lastGameOutcome)
         ? lastGameOutcome.outcome === "finished"
-          ? "완주 기록을 전송했습니다. 다음 경기 시작을 기다립니다."
-          : "포기 처리가 완료됐습니다. 다음 경기 시작을 기다립니다."
-        : "대기실과 연결되었습니다. 웹에서 준비 상태를 완료하세요.";
+          ? "완주 기록을 전송했습니다."
+          : "포기 처리가 완료됐습니다."
+        : "대기실과 연결되었습니다.";
       gameControls.hidden = true;
       if (overlayRestoreControls) {
         overlayRestoreControls.hidden = true;
@@ -275,14 +279,15 @@ async function renderConnectionState() {
       disconnectButton.disabled = false;
       disconnectButton.title = "";
     }
-    pairingForm.hidden = true;
+    pairingPanel.hidden = true;
     return;
   }
 
   updateWebNavigationControls();
   statusElement.textContent = "미연결";
+  statusCard?.setAttribute("data-state", "disconnected");
   description.textContent = "웹 대기실에서 발급한 8자리 코드를 입력하세요.";
-  pairingForm.hidden = false;
+  pairingPanel.hidden = false;
   gameControls.hidden = true;
   if (overlayRestoreControls) {
     overlayRestoreControls.hidden = true;

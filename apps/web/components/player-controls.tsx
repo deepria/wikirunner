@@ -1,7 +1,7 @@
 "use client";
 
 import type { RoomSnapshot } from "@wikirunner/contracts";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { issueAutoPairingNonce, issuePairingCode, setPlayerReady } from "../lib/game-api";
 import { CopyButton } from "./copy-button";
 
@@ -18,18 +18,32 @@ export function PlayerControls({ player, roomStatus, onChanged }: PlayerControls
   const [pairingCode, setPairingCode] = useState<string>();
   const [expiresAt, setExpiresAt] = useState<string>();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const autoPairingNonce = useRef<string | undefined>(undefined);
+  const autoPairingTimeout = useRef<number | undefined>(undefined);
+
+  function clearAutoPairingWait() {
+    autoPairingNonce.current = undefined;
+    if (autoPairingTimeout.current !== undefined) {
+      window.clearTimeout(autoPairingTimeout.current);
+      autoPairingTimeout.current = undefined;
+    }
+  }
 
   useEffect(() => {
     function onMessage(event: MessageEvent<unknown>) {
       if (event.origin !== window.location.origin || event.data === null || typeof event.data !== "object") return;
-      const message = event.data as { type?: unknown; ok?: unknown; message?: unknown };
-      if (message.type !== "WIKIRUNNER_AUTO_PAIR_RESULT") return;
+      const message = event.data as { type?: unknown; nonce?: unknown; ok?: unknown; message?: unknown };
+      if (message.type !== "WIKIRUNNER_AUTO_PAIR_RESULT" || message.nonce !== autoPairingNonce.current) return;
+      clearAutoPairingWait();
       setIsSubmitting(false);
       if (message.ok !== true) setError(typeof message.message === "string" ? message.message : "확장 프로그램을 연결하지 못했습니다.");
       else void onChanged();
     }
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      clearAutoPairingWait();
+    };
   }, [onChanged]);
 
   async function handleAutoPair() {
@@ -37,12 +51,20 @@ export function PlayerControls({ player, roomStatus, onChanged }: PlayerControls
     setIsSubmitting(true);
     try {
       const result = await issueAutoPairingNonce(player.id);
+      autoPairingNonce.current = result.nonce;
+      autoPairingTimeout.current = window.setTimeout(() => {
+        if (autoPairingNonce.current === result.nonce) {
+          clearAutoPairingWait();
+          setIsSubmitting(false);
+          setError("확장 프로그램의 응답을 받지 못했습니다. 수동 페어링 코드를 사용해 주세요.");
+        }
+      }, 10_000);
       window.postMessage({ type: "WIKIRUNNER_AUTO_PAIR_REQUEST", nonce: result.nonce }, window.location.origin);
     } catch (issueError) {
       setError(
         issueError instanceof Error ? issueError.message : "페어링 코드를 발급하지 못했습니다.",
       );
-    } finally {
+      clearAutoPairingWait();
       setIsSubmitting(false);
     }
   }
