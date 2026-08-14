@@ -8,10 +8,12 @@ import {
 } from "@wikirunner/contracts";
 import { normalizeNamuWikiUrl } from "@wikirunner/namuwiki";
 import {
+  abandonRun,
   disconnectExtension,
   type GeneratedPathArticle,
   getExtensionSnapshot,
   reportFairPlayViolation,
+  redeemAutoPairingNonce,
   submitGeneratedRandomPath,
   submitNavigationEvent,
 } from "./game-api";
@@ -81,6 +83,73 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     return true;
   }
 
+  if (isSetOverlayVisibilityMessage(message)) {
+    void setGameOverlayVisibility(message.visibility)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error: unknown) =>
+        sendResponse({
+          ok: false,
+          message: error instanceof Error ? error.message : "경기 오버레이 상태를 바꾸지 못했습니다.",
+        }),
+      );
+    return true;
+  }
+
+  if (isGetOverlayVisibilityMessage(message)) {
+    void chrome.storage.session
+      .get("overlayVisibility")
+      .then(({ overlayVisibility }) =>
+        sendResponse({ visibility: overlayVisibility === "hidden" ? "hidden" : "visible" }),
+      )
+      .catch(() => sendResponse({ visibility: "visible" }));
+    return true;
+  }
+
+  if (isAbandonActiveGameMessage(message) && sender.tab?.id !== undefined) {
+    void abandonActiveGameFromOverlay(sender.tab.id)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error: unknown) =>
+        sendResponse({
+          ok: false,
+          message: error instanceof Error ? error.message : "경기 포기를 처리하지 못했습니다.",
+        }),
+      );
+    return true;
+  }
+
+  if (isOpenActiveRoomMessage(message)) {
+    void openActiveRoom()
+      .then(() => sendResponse({ ok: true }))
+      .catch((error: unknown) =>
+        sendResponse({
+          ok: false,
+          message: error instanceof Error ? error.message : "방 화면을 열지 못했습니다.",
+        }),
+      );
+    return true;
+  }
+
+  if (isRedeemAutoPairingNonceMessage(message)) {
+    void redeemAutoPairingNonce(message.nonce)
+      .then(async (result) => {
+        await chrome.storage.local.set({ activeRoomId: result.roomId, activePlayerId: result.playerId, pairedAt: result.pairedAt });
+        await subscribeToRoom(result.roomId);
+        sendResponse({ ok: true, roomId: result.roomId });
+      })
+      .catch((error: unknown) => sendResponse({ ok: false, message: error instanceof Error ? error.message : "자동 연결에 실패했습니다." }));
+    return true;
+  }
+
+  if (isWebRoomOpenedMessage(message) && sender.tab?.id !== undefined) {
+    void handleWebRoomOpened(message.roomId, sender.tab.id).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
+  if (isWebRoomLeftMessage(message)) {
+    void handleWebRoomLeft(message.roomId).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
   if (isFairPlayStateRequestMessage(message) && sender.tab?.id !== undefined) {
     void getFairPlayState(sender.tab.id)
       .then(sendResponse)
@@ -133,6 +202,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.webNavigation.onCommitted.addListener(enqueueWebNavigation);
 chrome.webNavigation.onHistoryStateUpdated.addListener(enqueueWebNavigation);
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void handleRoomTabClosed(tabId);
+});
 
 function enqueueWebNavigation(
   details: chrome.webNavigation.WebNavigationTransitionCallbackDetails,
@@ -309,13 +381,12 @@ async function generateNamuWikiPathInBrowser(
       let current = start;
 
       for (let step = 0; step < targetDepth; step += 1) {
-        const candidates = (await fetchNamuWikiLinks(current)).filter(
-          (article) => !seen.has(article.key),
-        );
-        if (candidates.length === 0) {
+        const candidates = await fetchNamuWikiLinks(current);
+        const nextArticle = await pickUnvisitedCanonicalArticle(candidates, seen);
+        if (!nextArticle) {
           throw new Error("연결된 문서가 부족합니다.");
         }
-        current = pickRandom(candidates);
+        current = nextArticle;
         path.push(current);
         seen.add(current.key);
       }
@@ -328,25 +399,17 @@ async function generateNamuWikiPathInBrowser(
 }
 
 async function fetchRandomNamuWikiArticle(): Promise<GeneratedPathArticle> {
-  const response = await fetch(`${NAMUWIKI_ORIGIN}/random`, { redirect: "follow" });
-  if (!response.ok) {
-    throw new Error(`나무위키 랜덤 문서를 불러오지 못했습니다. (${response.status})`);
-  }
-  const article = articleFromNamuWikiUrl(response.url);
-  if (!article) {
-    throw new Error("나무위키 랜덤 문서의 주소를 확인하지 못했습니다.");
-  }
-  return article;
+  const document = await fetchNamuWikiDocument(`${NAMUWIKI_ORIGIN}/random`, "랜덤 문서");
+  return document.article;
 }
 
 async function fetchNamuWikiLinks(article: GeneratedPathArticle): Promise<GeneratedPathArticle[]> {
-  const response = await fetch(`${NAMUWIKI_ORIGIN}/w/${encodeURIComponent(article.key)}`);
-  if (!response.ok) {
-    throw new Error(`문서를 불러오지 못했습니다. (${response.status})`);
-  }
+  const document = await fetchNamuWikiDocument(
+    `${NAMUWIKI_ORIGIN}/w/${encodeURIComponent(article.key)}`,
+    "문서",
+  );
   const links = new Map<string, GeneratedPathArticle>();
-  const html = await response.text();
-  for (const match of html.matchAll(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>/gi)) {
+  for (const match of document.html.matchAll(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>/gi)) {
     const href = match[1];
     if (!href) {
       continue;
@@ -360,6 +423,60 @@ async function fetchNamuWikiLinks(article: GeneratedPathArticle): Promise<Genera
     throw new Error("문서에서 내부 링크를 찾지 못했습니다.");
   }
   return [...links.values()];
+}
+
+async function pickUnvisitedCanonicalArticle(
+  candidates: GeneratedPathArticle[],
+  seen: ReadonlySet<string>,
+): Promise<GeneratedPathArticle | undefined> {
+  const remaining = [...candidates];
+  while (remaining.length > 0) {
+    const candidateIndex = Math.floor(Math.random() * remaining.length);
+    const [candidate] = remaining.splice(candidateIndex, 1);
+    if (!candidate) {
+      continue;
+    }
+    const resolved = await fetchNamuWikiDocument(
+      `${NAMUWIKI_ORIGIN}/w/${encodeURIComponent(candidate.key)}`,
+      "연결 문서",
+    );
+    if (!seen.has(resolved.article.key)) {
+      return resolved.article;
+    }
+  }
+  return undefined;
+}
+
+async function fetchNamuWikiDocument(
+  url: string,
+  label: string,
+): Promise<{ article: GeneratedPathArticle; html: string }> {
+  const response = await fetch(url, { redirect: "follow" });
+  if (!response.ok) {
+    throw new Error(`${label}를 불러오지 못했습니다. (${response.status})`);
+  }
+  const html = await response.text();
+  const article = articleFromCanonicalNamuWikiDocument(response.url, html);
+  if (!article) {
+    throw new Error(`${label}의 최종 주소를 확인하지 못했습니다.`);
+  }
+  return { article, html };
+}
+
+function articleFromCanonicalNamuWikiDocument(
+  responseUrl: string,
+  html: string,
+): GeneratedPathArticle | null {
+  for (const tag of html.matchAll(/<link\b[^>]*>/gi)) {
+    if (!/\brel=["'][^"']*\bcanonical\b[^"']*["']/i.test(tag[0])) {
+      continue;
+    }
+    const href = /\bhref=["']([^"']+)["']/i.exec(tag[0])?.[1];
+    if (href) {
+      return articleFromNamuWikiUrl(href);
+    }
+  }
+  return articleFromNamuWikiUrl(responseUrl);
 }
 
 function articleFromNamuWikiUrl(value: string): GeneratedPathArticle | null {
@@ -512,7 +629,11 @@ async function synchronizeGame(snapshot: RoomSnapshot): Promise<void> {
 }
 
 async function openScheduledGame(): Promise<void> {
-  const { activeGame, gameTabId } = await chrome.storage.local.get(["activeGame", "gameTabId"]);
+  const { activeGame, gameTabId, roomTabId } = await chrome.storage.local.get([
+    "activeGame",
+    "gameTabId",
+    "roomTabId",
+  ]);
   if (!isActiveGame(activeGame)) {
     return;
   }
@@ -542,6 +663,10 @@ async function openScheduledGame(): Promise<void> {
     gameOpenedAt: new Date().toISOString(),
   });
   await enableFairPlayRules(tabId);
+  if (typeof roomTabId === "number" && roomTabId !== tabId) {
+    await chrome.storage.local.remove("roomTabId");
+    await chrome.tabs.remove(roomTabId).catch(() => undefined);
+  }
 }
 
 async function getFairPlayState(tabId: number): Promise<{ enabled: boolean }> {
@@ -552,6 +677,73 @@ async function getFairPlayState(tabId: number): Promise<{ enabled: boolean }> {
       gameTabId === tabId &&
       Date.now() >= new Date(activeGame.scheduledAt).getTime(),
   };
+}
+
+async function setGameOverlayVisibility(visibility: "visible" | "hidden"): Promise<void> {
+  const { activeGame, gameTabId } = await chrome.storage.local.get(["activeGame", "gameTabId"]);
+  if (!isActiveGame(activeGame) || typeof gameTabId !== "number") {
+    throw new Error("진행 중인 경기 탭이 없습니다.");
+  }
+  await chrome.tabs.sendMessage(gameTabId, { type: "SET_OVERLAY_VISIBILITY", visibility });
+  await chrome.storage.session.set({ overlayVisibility: visibility });
+}
+
+async function abandonActiveGameFromOverlay(tabId: number): Promise<void> {
+  const { activeGame, activeRun, gameTabId } = await chrome.storage.local.get([
+    "activeGame",
+    "activeRun",
+    "gameTabId",
+  ]);
+  if (!isActiveGame(activeGame) || !isActiveRun(activeRun) || gameTabId !== tabId) {
+    throw new Error("진행 중인 경기 탭이 아닙니다.");
+  }
+  const result = await abandonRun(activeGame.gameId, activeRun.runId);
+  await resetActiveGame("abandoned", result.abandonedAt, activeGame.gameId);
+}
+
+async function openActiveRoom(): Promise<void> {
+  const { activeRoomId } = await chrome.storage.local.get("activeRoomId");
+  if (typeof activeRoomId !== "string") {
+    throw new Error("연결된 방이 없습니다.");
+  }
+  await openRoomTab(activeRoomId);
+}
+
+async function handleWebRoomOpened(roomId: string, tabId: number): Promise<void> {
+  const { activeRoomId, activeGame } = await chrome.storage.local.get(["activeRoomId", "activeGame"]);
+  if (typeof activeRoomId === "string" && activeRoomId !== roomId && !isActiveGame(activeGame)) {
+    await disconnectPairing().catch(() => undefined);
+  }
+  await chrome.storage.local.set({ roomTabId: tabId });
+}
+
+async function handleWebRoomLeft(roomId: string): Promise<void> {
+  const { activeRoomId, activeGame } = await chrome.storage.local.get(["activeRoomId", "activeGame"]);
+  if (activeRoomId === roomId && !isActiveGame(activeGame)) {
+    await disconnectPairing().catch(() => undefined);
+  }
+}
+
+async function handleRoomTabClosed(tabId: number): Promise<void> {
+  const { roomTabId, activeGame } = await chrome.storage.local.get(["roomTabId", "activeGame"]);
+  if (roomTabId !== tabId) return;
+  await chrome.storage.local.remove("roomTabId");
+  if (!isActiveGame(activeGame)) await disconnectPairing().catch(() => undefined);
+}
+
+async function openRoomTab(roomId: string): Promise<void> {
+  const configuredUrl = import.meta.env.VITE_WEB_APP_URL?.trim() || "http://localhost:3000";
+  const url = new URL(configuredUrl);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("웹 주소 설정이 올바르지 않습니다.");
+  }
+  url.pathname = `${url.pathname.replace(/\/$/, "")}/rooms/${encodeURIComponent(roomId)}`;
+  url.search = "";
+  url.hash = "";
+  const tab = await chrome.tabs.create({ active: true, url: url.toString() });
+  if (typeof tab.id === "number") {
+    await chrome.storage.local.set({ roomTabId: tab.id });
+  }
 }
 
 async function enableFairPlayRules(tabId: number): Promise<void> {
@@ -685,6 +877,7 @@ async function observeNavigation(signal: NavigationSignal): Promise<void> {
     },
   });
   await chrome.storage.session.remove("pendingLinkIntent");
+  await chrome.storage.session.remove("overlayVisibility");
   await flushOutbox();
 }
 
@@ -860,8 +1053,9 @@ async function resetActiveGame(
   occurredAt: string,
   expectedGameId?: string,
 ): Promise<void> {
-  const { activeGame, navigationOutbox } = await chrome.storage.local.get([
+  const { activeGame, gameTabId, navigationOutbox } = await chrome.storage.local.get([
     "activeGame",
+    "gameTabId",
     "navigationOutbox",
   ]);
   if (expectedGameId && isActiveGame(activeGame) && activeGame.gameId !== expectedGameId) {
@@ -884,6 +1078,7 @@ async function resetActiveGame(
   await chrome.alarms.clear(OUTBOX_RETRY_ALARM);
   await clearFairPlayRules();
   await chrome.storage.session.remove("pendingLinkIntent");
+  await chrome.storage.session.remove("overlayVisibility");
   await chrome.storage.local.remove([
     "activeGame",
     "activeRun",
@@ -897,6 +1092,13 @@ async function resetActiveGame(
     lastCompletedGame,
     lastFinalizedGameId: gameId ?? null,
   });
+  if (typeof gameTabId === "number") {
+    await chrome.tabs.remove(gameTabId).catch(() => undefined);
+  }
+  const roomId = isActiveGame(activeGame) ? activeGame.roomId : undefined;
+  if (roomId) {
+    await openRoomTab(roomId).catch(() => undefined);
+  }
   recentNavigationSignals.clear();
   recentFairPlayReports.clear();
 }
@@ -1013,6 +1215,31 @@ interface GenerateRandomPathMessage {
   difficulty: RandomDifficulty;
 }
 
+interface SetOverlayVisibilityMessage {
+  type: "SET_OVERLAY_VISIBILITY";
+  visibility: "visible" | "hidden";
+}
+
+interface GetOverlayVisibilityMessage {
+  type: "GET_OVERLAY_VISIBILITY";
+}
+
+interface AbandonActiveGameMessage {
+  type: "ABANDON_ACTIVE_GAME";
+}
+
+interface OpenActiveRoomMessage {
+  type: "OPEN_ACTIVE_ROOM";
+}
+
+interface RedeemAutoPairingNonceMessage {
+  type: "REDEEM_AUTO_PAIRING_NONCE";
+  nonce: string;
+}
+
+interface WebRoomOpenedMessage { type: "WEB_ROOM_OPENED"; roomId: string; }
+interface WebRoomLeftMessage { type: "WEB_ROOM_LEFT"; roomId: string; }
+
 interface FairPlayStateRequestMessage {
   type: "GET_FAIR_PLAY_STATE";
 }
@@ -1069,6 +1296,55 @@ function isGenerateRandomPathMessage(value: unknown): value is GenerateRandomPat
       candidate.difficulty === "normal" ||
       candidate.difficulty === "hard")
   );
+}
+
+function isSetOverlayVisibilityMessage(value: unknown): value is SetOverlayVisibilityMessage {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value as Partial<SetOverlayVisibilityMessage>).type === "SET_OVERLAY_VISIBILITY" &&
+    ((value as Partial<SetOverlayVisibilityMessage>).visibility === "visible" ||
+      (value as Partial<SetOverlayVisibilityMessage>).visibility === "hidden")
+  );
+}
+
+function isGetOverlayVisibilityMessage(value: unknown): value is GetOverlayVisibilityMessage {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value as Partial<GetOverlayVisibilityMessage>).type === "GET_OVERLAY_VISIBILITY"
+  );
+}
+
+function isAbandonActiveGameMessage(value: unknown): value is AbandonActiveGameMessage {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value as Partial<AbandonActiveGameMessage>).type === "ABANDON_ACTIVE_GAME"
+  );
+}
+
+function isOpenActiveRoomMessage(value: unknown): value is OpenActiveRoomMessage {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value as Partial<OpenActiveRoomMessage>).type === "OPEN_ACTIVE_ROOM"
+  );
+}
+
+function isRedeemAutoPairingNonceMessage(value: unknown): value is RedeemAutoPairingNonceMessage {
+  return value !== null && typeof value === "object" &&
+    (value as Partial<RedeemAutoPairingNonceMessage>).type === "REDEEM_AUTO_PAIRING_NONCE" &&
+    typeof (value as Partial<RedeemAutoPairingNonceMessage>).nonce === "string" &&
+    /^[0-9a-f-]{36}$/i.test((value as { nonce: string }).nonce);
+}
+
+function isWebRoomOpenedMessage(value: unknown): value is WebRoomOpenedMessage {
+  return value !== null && typeof value === "object" && (value as Partial<WebRoomOpenedMessage>).type === "WEB_ROOM_OPENED" && typeof (value as Partial<WebRoomOpenedMessage>).roomId === "string";
+}
+
+function isWebRoomLeftMessage(value: unknown): value is WebRoomLeftMessage {
+  return value !== null && typeof value === "object" && (value as Partial<WebRoomLeftMessage>).type === "WEB_ROOM_LEFT" && typeof (value as Partial<WebRoomLeftMessage>).roomId === "string";
 }
 
 function isFairPlayStateRequestMessage(value: unknown): value is FairPlayStateRequestMessage {

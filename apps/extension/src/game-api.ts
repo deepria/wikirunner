@@ -37,6 +37,16 @@ export async function pairExtension(pairingCode: string): Promise<PairingResult>
   return serverEnvelopeSchema(pairingResultSchema).parse(envelope).data;
 }
 
+export async function redeemAutoPairingNonce(nonce: string): Promise<PairingResult> {
+  const idempotencyKey = crypto.randomUUID();
+  const envelope = await apiFetch("/v1/extension/auto-pair", {
+    method: "POST",
+    body: JSON.stringify({ schemaVersion: 1, idempotencyKey, nonce }),
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+  });
+  return serverEnvelopeSchema(pairingResultSchema).parse(envelope).data;
+}
+
 export async function disconnectExtension(): Promise<DisconnectExtensionResult> {
   const idempotencyKey = crypto.randomUUID();
   const envelope = await apiFetch("/v1/extension/disconnect", {

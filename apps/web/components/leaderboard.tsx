@@ -2,17 +2,22 @@
 
 import type { NavigationRouteStep, RoomSnapshot } from "@wikirunner/contracts";
 import { type SyntheticEvent, useState } from "react";
-import { getGameRoutes } from "../lib/game-api";
+import { decideViolation, getGameRoutes, getGameViolations } from "../lib/game-api";
 
 interface LeaderboardProps {
   game: NonNullable<RoomSnapshot["game"]>;
   runs: RoomSnapshot["runs"];
+  isHost: boolean;
+  onChanged: () => Promise<void>;
 }
 
-export function Leaderboard({ game, runs }: LeaderboardProps) {
+export function Leaderboard({ game, runs, isHost, onChanged }: LeaderboardProps) {
   const [routesByRun, setRoutesByRun] = useState<Record<string, NavigationRouteStep[]>>({});
   const [loadingRunId, setLoadingRunId] = useState<string>();
   const [routeError, setRouteError] = useState<{ runId: string; message: string }>();
+  const [violations, setViolations] = useState<Awaited<ReturnType<typeof getGameViolations>>["violations"]>([]);
+  async function loadViolations() { setViolations((await getGameViolations(game.id)).violations); }
+  async function resolveViolation(id: string, resolution: "accepted" | "disqualified") { await decideViolation(game.id, id, resolution); await loadViolations(); await onChanged(); }
 
   async function handleRouteToggle(event: SyntheticEvent<HTMLDetailsElement>, runId: string) {
     if (!event.currentTarget.open) {
@@ -95,6 +100,7 @@ export function Leaderboard({ game, runs }: LeaderboardProps) {
           );
         })}
       </ol>
+      {isHost ? <section className="generated-path"><h3>경고 검토</h3><button type="button" onClick={() => void loadViolations()}>경고 불러오기</button>{violations.filter((v) => v.resolution === "pending").map((v) => <p key={v.id}>{v.nickname} · {v.type} <button type="button" onClick={() => void resolveViolation(v.id, "accepted")}>수락</button> <button type="button" onClick={() => void resolveViolation(v.id, "disqualified")}>실격</button></p>)}</section> : null}
       {game.generatedPath?.length ? (
         <section className="generated-path">
           <h3>이번 랜덤 생성 경로</h3>

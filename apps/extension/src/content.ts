@@ -70,6 +70,22 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
         background: transparent;
         cursor: pointer;
       }
+      .overlay-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        padding: 0 12px 12px;
+      }
+      .overlay-actions button {
+        min-height: 30px;
+        border: 1px solid #4c4f4c;
+        font-size: 11px;
+        font-weight: 700;
+      }
+      .overlay-actions .danger {
+        border-color: #a32314;
+        background: #a32314;
+      }
       dl {
         display: grid;
         grid-template-columns: 48px 1fr;
@@ -90,11 +106,18 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
       section[data-collapsed="true"] dl {
         display: none;
       }
+      section[data-collapsed="true"] .finish-banner,
+      section[data-collapsed="true"] .fair-play-notice {
+        display: none;
+      }
     </style>
     <section>
       <header>
         <strong>WikiRunner</strong>
-        <button type="button" aria-label="오버레이 접기" aria-expanded="true">−</button>
+        <div>
+          <button id="overlay-collapse" type="button" aria-label="오버레이 접기" aria-expanded="true">접기</button>
+          <button id="overlay-hide" type="button" aria-label="오버레이 숨기기">숨기기</button>
+        </div>
       </header>
       <div class="finish-banner" id="finish-banner" hidden role="status" aria-live="polite">
         <strong id="finish-title">경기 진행중.. 달리세요!</strong>
@@ -110,21 +133,94 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
         <dt>이동</dt><dd id="move-count">0회</dd>
         <dt>상태</dt><dd id="game-status">미연결</dd>
       </dl>
+      <div class="overlay-actions" id="overlay-actions" hidden>
+        <button class="danger" id="overlay-abandon" type="button">포기</button>
+        <button id="overlay-open-room" type="button">방으로 이동</button>
+      </div>
     </section>
   `;
 
   const panel = shadow.querySelector("section");
-  const toggle = shadow.querySelector<HTMLButtonElement>("button");
+  const toggle = shadow.querySelector<HTMLButtonElement>("#overlay-collapse");
+  const hideOverlayButton = shadow.querySelector<HTMLButtonElement>("#overlay-hide");
+  const overlayActions = shadow.querySelector<HTMLElement>("#overlay-actions");
+  const abandonOverlayButton = shadow.querySelector<HTMLButtonElement>("#overlay-abandon");
+  const openRoomOverlayButton = shadow.querySelector<HTMLButtonElement>("#overlay-open-room");
   toggle?.addEventListener("click", () => {
     const collapsed = panel?.dataset.collapsed !== "true";
     if (panel) {
       panel.dataset.collapsed = String(collapsed);
     }
-    toggle.textContent = collapsed ? "+" : "−";
+    toggle.textContent = collapsed ? "펼치기" : "접기";
+    toggle.setAttribute("aria-label", collapsed ? "오버레이 펼치기" : "오버레이 접기");
     toggle.setAttribute("aria-expanded", String(!collapsed));
   });
 
+  function setOverlayVisibility(visibility: "visible" | "hidden"): void {
+    host.style.display = visibility === "hidden" ? "none" : "";
+    host.setAttribute("aria-hidden", visibility === "hidden" ? "true" : "false");
+  }
+
+  hideOverlayButton?.addEventListener("click", () => {
+    void chrome.runtime.sendMessage({ type: "SET_OVERLAY_VISIBILITY", visibility: "hidden" });
+  });
+
+  abandonOverlayButton?.addEventListener("click", () => {
+    if (!window.confirm("이번 경기를 포기할까요? 기록은 포기로 남습니다.")) {
+      return;
+    }
+    abandonOverlayButton.disabled = true;
+    void chrome.runtime
+      .sendMessage({ type: "ABANDON_ACTIVE_GAME" })
+      .then((response: unknown) => {
+        if (!isSuccessfulResponse(response)) {
+          throw new Error("경기 포기를 처리하지 못했습니다.");
+        }
+      })
+      .catch(() => {
+        abandonOverlayButton.disabled = false;
+        showFairPlayNotice("경기 포기를 처리하지 못했습니다. 확장 프로그램 팝업에서 다시 시도하세요.");
+      });
+  });
+
+  openRoomOverlayButton?.addEventListener("click", () => {
+    void chrome.runtime
+      .sendMessage({ type: "OPEN_ACTIVE_ROOM" })
+      .then((response: unknown) => {
+        if (!isSuccessfulResponse(response)) {
+          throw new Error("방 화면을 열지 못했습니다.");
+        }
+      })
+      .catch(() => showFairPlayNotice("방 화면을 열지 못했습니다. 확장 프로그램 팝업에서 다시 시도하세요."));
+  });
+
+  chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+    if (
+      message !== null &&
+      typeof message === "object" &&
+      (message as { type?: unknown }).type === "SET_OVERLAY_VISIBILITY" &&
+      ((message as { visibility?: unknown }).visibility === "visible" ||
+        (message as { visibility?: unknown }).visibility === "hidden")
+    ) {
+      setOverlayVisibility((message as { visibility: "visible" | "hidden" }).visibility);
+      sendResponse({ ok: true });
+    }
+  });
+
   document.documentElement.append(host);
+
+  void chrome.runtime
+    .sendMessage({ type: "GET_OVERLAY_VISIBILITY" })
+    .then((response: unknown) => {
+      if (
+        response !== null &&
+        typeof response === "object" &&
+        (response as { visibility?: unknown }).visibility === "hidden"
+      ) {
+        setOverlayVisibility("hidden");
+      }
+    })
+    .catch(() => undefined);
 
   const currentArticleElement = shadow.querySelector<HTMLElement>("#current-article");
   const targetElement = shadow.querySelector<HTMLElement>("#target");
@@ -160,6 +256,9 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
     currentArticleElement.textContent = currentArticle.title;
     currentArticleElement.title = currentArticle.title;
     if (!activeGame) {
+      if (overlayActions) {
+        overlayActions.hidden = true;
+      }
       targetElement.textContent = "연결 대기";
       timerElement.textContent = "--:--.--";
       moveCountElement.textContent = "0회";
@@ -178,6 +277,9 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
     }
 
     targetElement.textContent = activeGame.targetArticleTitle;
+    if (overlayActions) {
+      overlayActions.hidden = activeRun?.status === "finished";
+    }
     targetElement.title = activeGame.targetArticleTitle;
     moveCountElement.textContent = `${activeRun?.moveCount ?? 0}회`;
     const scheduledTime = new Date(activeGame.scheduledAt).getTime();
@@ -377,13 +479,6 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
     }, 3_000);
   }
 
-  function reportBlockedSearchAttempt(): void {
-    void chrome.runtime.sendMessage({
-      type: "FAIR_PLAY_BLOCKED",
-      violationType: "search_attempt",
-    });
-  }
-
   function blockedFairPlayReason(target: Element): string | undefined {
     if (target.closest('input[type="search"]')) {
       return "경기 중에는 문서 검색을 사용할 수 없습니다.";
@@ -442,7 +537,6 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
       }
       event.preventDefault();
       event.stopImmediatePropagation();
-      reportBlockedSearchAttempt();
       showFairPlayNotice(reason);
     },
     { capture: true },
@@ -476,7 +570,6 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
       }
       event.preventDefault();
       event.stopImmediatePropagation();
-      reportBlockedSearchAttempt();
       showFairPlayNotice("경기 중에는 문서 검색을 사용할 수 없습니다.");
     },
     { capture: true },
@@ -500,7 +593,6 @@ if (article.ok && !document.querySelector("#wikirunner-root")) {
       }
       event.preventDefault();
       event.stopImmediatePropagation();
-      reportBlockedSearchAttempt();
       showFairPlayNotice(
         isBrowserFindShortcut
           ? "경기 중에는 브라우저 찾기 기능을 사용할 수 없습니다."
@@ -671,4 +763,8 @@ function isCompletedGame(value: unknown): value is CompletedGame {
     typeof candidate.targetArticleKey === "string" &&
     typeof candidate.targetArticleTitle === "string"
   );
+}
+
+function isSuccessfulResponse(value: unknown): value is { ok: true } {
+  return value !== null && typeof value === "object" && (value as { ok?: unknown }).ok === true;
 }

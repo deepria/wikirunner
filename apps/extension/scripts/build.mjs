@@ -46,6 +46,11 @@ await buildEntry({
   name: "service-worker",
 });
 await buildEntry({
+  input: "src/web-bridge.ts",
+  name: "web-bridge",
+  format: "iife",
+});
+await buildEntry({
   input: "popup.html",
   name: "popup",
 });

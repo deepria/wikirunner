@@ -149,6 +149,7 @@ export default function RoomPage() {
     try {
       await leaveOrKickPlayer(playerId);
       if (isSelf) {
+        window.postMessage({ type: "WIKIRUNNER_ROOM_LEFT", roomId: snapshot.room.id }, window.location.origin);
         window.location.assign("/");
         return;
       }
@@ -324,7 +325,7 @@ export default function RoomPage() {
       </section>
 
       {snapshot.game && snapshot.runs.length > 0 ? (
-        <Leaderboard key={snapshot.game.id} game={snapshot.game} runs={snapshot.runs} />
+        <Leaderboard key={snapshot.game.id} game={snapshot.game} runs={snapshot.runs} isHost={isCurrentPlayerHost} onChanged={loadSnapshot} />
       ) : null}
 
       {isCurrentPlayerHost && snapshot.room.status === "waiting" ? (

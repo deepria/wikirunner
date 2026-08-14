@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -6,6 +7,9 @@ const nextConfig: NextConfig = {
   },
   reactStrictMode: true,
   transpilePackages: ["@wikirunner/contracts"],
+  turbopack: {
+    root: resolve(import.meta.dirname, "../.."),
+  },
 };
 
 export default nextConfig;

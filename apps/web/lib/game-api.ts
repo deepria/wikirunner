@@ -7,8 +7,14 @@ import {
   type EndGameResult,
   endGameResultSchema,
   type GameRoutesResult,
+  type GameViolationsResult,
+  gameViolationsResultSchema,
+  type ViolationDecisionResult,
+  violationDecisionResultSchema,
   gameRoutesResultSchema,
   type PairingCodeResult,
+  type AutoPairingNonceResult,
+  autoPairingNonceResultSchema,
   type LeaveOrKickPlayerResult,
   leaveOrKickPlayerResultSchema,
   type PrepareNextGameResult,
@@ -133,6 +139,16 @@ export async function issuePairingCode(playerId: string): Promise<PairingCodeRes
   return serverEnvelopeSchema(pairingCodeResultSchema).parse(envelope).data;
 }
 
+export async function issueAutoPairingNonce(playerId: string): Promise<AutoPairingNonceResult> {
+  const idempotencyKey = crypto.randomUUID();
+  const envelope = await gameApiFetch(`/v1/players/${playerId}/auto-pairing-nonce`, {
+    method: "POST",
+    body: JSON.stringify({ schemaVersion: 1, idempotencyKey, playerId }),
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+  });
+  return serverEnvelopeSchema(autoPairingNonceResultSchema).parse(envelope).data;
+}
+
 export async function setPlayerReady(playerId: string, ready: boolean): Promise<ReadyResult> {
   const idempotencyKey = crypto.randomUUID();
   const envelope = await gameApiFetch(`/v1/players/${playerId}/ready`, {
@@ -225,6 +241,17 @@ export async function getGameRoutes(gameId: string): Promise<GameRoutesResult> {
     method: "GET",
   });
   return serverEnvelopeSchema(gameRoutesResultSchema).parse(envelope).data;
+}
+
+export async function getGameViolations(gameId: string): Promise<GameViolationsResult> {
+  const envelope = await gameApiFetch(`/v1/games/${gameId}/violations`, { method: "GET" });
+  return serverEnvelopeSchema(gameViolationsResultSchema).parse(envelope).data;
+}
+
+export async function decideViolation(gameId: string, violationId: string, resolution: "accepted" | "disqualified"): Promise<ViolationDecisionResult> {
+  const idempotencyKey = crypto.randomUUID();
+  const envelope = await gameApiFetch(`/v1/games/${gameId}/violations/${violationId}/decision`, { method: "POST", body: JSON.stringify({ schemaVersion: 1, idempotencyKey, violationId, resolution, note: "" }), headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey } });
+  return serverEnvelopeSchema(violationDecisionResultSchema).parse(envelope).data;
 }
 
 async function commandRequest(

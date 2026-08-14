@@ -120,6 +120,14 @@ export const redeemPairingCodeCommandSchema = commandMetaSchema.extend({
   pairingCode: pairingCodeSchema,
 });
 
+export const issueAutoPairingNonceCommandSchema = commandMetaSchema.extend({
+  playerId: idSchema,
+});
+
+export const redeemAutoPairingNonceCommandSchema = commandMetaSchema.extend({
+  nonce: idSchema,
+});
+
 export const disconnectExtensionCommandSchema = commandMetaSchema;
 
 export const setPlayerReadyCommandSchema = commandMetaSchema.extend({
@@ -155,6 +163,18 @@ export const reportFairPlayViolationCommandSchema = commandMetaSchema.extend({
   runId: idSchema,
   type: z.enum(["search_attempt", "new_tab"]),
 });
+export const decideViolationCommandSchema = commandMetaSchema.extend({
+  violationId: idSchema,
+  resolution: z.enum(["accepted", "disqualified"]),
+  note: z.string().trim().max(500).default(""),
+});
+export const violationSummarySchema = z.object({
+  id: idSchema, runId: idSchema, nickname: nicknameSchema,
+  type: z.string(), resolution: z.enum(["pending", "accepted", "disqualified"]),
+  detectedAt: instantSchema, resolutionNote: z.string().nullable(),
+});
+export const gameViolationsResultSchema = z.object({ gameId: idSchema, violations: z.array(violationSummarySchema) });
+export const violationDecisionResultSchema = z.object({ violationId: idSchema, resolution: z.enum(["accepted", "disqualified"]), gameId: idSchema });
 
 export const navigationEventSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
@@ -227,6 +247,12 @@ export const pairingResultSchema = z.object({
   roomId: idSchema,
   playerId: idSchema,
   pairedAt: instantSchema,
+});
+
+export const autoPairingNonceResultSchema = z.object({
+  playerId: idSchema,
+  nonce: idSchema,
+  expiresAt: instantSchema,
 });
 
 export const disconnectExtensionResultSchema = z.object({
@@ -368,6 +394,8 @@ export type UpdateRoomSettingsCommand = z.infer<typeof updateRoomSettingsCommand
 export type GenerateRandomPathCommand = z.infer<typeof generateRandomPathCommandSchema>;
 export type IssuePairingCodeCommand = z.infer<typeof issuePairingCodeCommandSchema>;
 export type RedeemPairingCodeCommand = z.infer<typeof redeemPairingCodeCommandSchema>;
+export type IssueAutoPairingNonceCommand = z.infer<typeof issueAutoPairingNonceCommandSchema>;
+export type RedeemAutoPairingNonceCommand = z.infer<typeof redeemAutoPairingNonceCommandSchema>;
 export type DisconnectExtensionCommand = z.infer<typeof disconnectExtensionCommandSchema>;
 export type SetPlayerReadyCommand = z.infer<typeof setPlayerReadyCommandSchema>;
 export type LeaveOrKickPlayerCommand = z.infer<typeof leaveOrKickPlayerCommandSchema>;
@@ -376,6 +404,9 @@ export type PrepareNextGameCommand = z.infer<typeof prepareNextGameCommandSchema
 export type EndGameCommand = z.infer<typeof endGameCommandSchema>;
 export type AbandonRunCommand = z.infer<typeof abandonRunCommandSchema>;
 export type ReportFairPlayViolationCommand = z.infer<typeof reportFairPlayViolationCommandSchema>;
+export type DecideViolationCommand = z.infer<typeof decideViolationCommandSchema>;
+export type GameViolationsResult = z.infer<typeof gameViolationsResultSchema>;
+export type ViolationDecisionResult = z.infer<typeof violationDecisionResultSchema>;
 export type NavigationEvent = z.infer<typeof navigationEventSchema>;
 export type SubmitNavigationEventsCommand = z.infer<typeof submitNavigationEventsCommandSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
@@ -385,6 +416,7 @@ export type RoomCommandResult = z.infer<typeof roomCommandResultSchema>;
 export type RoomSettingsResult = z.infer<typeof roomSettingsResultSchema>;
 export type PairingCodeResult = z.infer<typeof pairingCodeResultSchema>;
 export type PairingResult = z.infer<typeof pairingResultSchema>;
+export type AutoPairingNonceResult = z.infer<typeof autoPairingNonceResultSchema>;
 export type DisconnectExtensionResult = z.infer<typeof disconnectExtensionResultSchema>;
 export type ReadyResult = z.infer<typeof readyResultSchema>;
 export type GameSummary = z.infer<typeof gameSummarySchema>;

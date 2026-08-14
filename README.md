@@ -15,7 +15,7 @@
 
 ## 요구 사항
 
-- Node.js 22 이상 (`.nvmrc`는 22.13.1)
+- Node.js 22 이상
 - pnpm 10.26.1
 - Chrome 또는 Chromium 계열 브라우저
 - Supabase 프로젝트
@@ -55,7 +55,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
 VITE_WEB_APP_URL=http://localhost:3000
 ```
 
-`PAIRING_CODE_SECRET`는 **클라이언트 환경 변수에 넣지 않습니다.** 서버의 Edge Function 시크릿으로만 설정합니다.
+`PAIRING_CODE_SECRET`는 수동 코드와 자동 연결 nonce 모두에 사용하므로 **클라이언트 환경 변수에 넣지 않습니다.** 서버의 Edge Function 시크릿으로만 설정합니다.
 
 ### 3. 웹 앱 실행
 
@@ -118,7 +118,7 @@ supabase stop
 
 1. 웹 앱에서 익명으로 접속한 뒤 **새 방 만들기** 또는 초대 코드로 방에 참가합니다.
 2. 방장이 시작·목표 문서를 직접 설정하거나, 연결한 확장 프로그램에서 난이도를 고르고 랜덤 경로를 추첨합니다.
-3. 각 참가자는 **페어링 코드 발급**을 누르고, Chrome 확장 프로그램 팝업에 코드를 입력해 연결합니다.
+3. 각 참가자는 **확장 프로그램 연결**을 눌러 같은 브라우저 프로필에 설치된 Chrome 확장 프로그램을 자동으로 연결합니다.
 4. 모든 참가자가 **준비 완료**를 누르면 호스트가 10초 카운트다운을 시작합니다.
 5. 카운트다운이 끝나면 확장 프로그램이 시작 문서를 연 전용 나무위키 탭을 만듭니다.
 6. 해당 탭에서 본문 내부 링크를 따라 목표 문서로 이동합니다. 확장 프로그램이 이동 횟수와 시간을 기록합니다.
@@ -191,7 +191,14 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
 pnpm --filter @wikirunner/extension build
 ```
 
-생성된 `apps/extension/dist`를 Chrome Web Store 제출용 ZIP으로 압축합니다. 제출 전에는 다음을 확인합니다.
+Chrome Web Store 제출용 ZIP은 다음 명령으로 만듭니다. 결과 파일은
+`apps/extension/wikirunner-extension.zip`입니다.
+
+```bash
+pnpm --filter @wikirunner/extension package
+```
+
+제출 전에는 다음을 확인합니다.
 
 - `apps/extension/public/manifest.json`의 버전을 올렸는지
 - 운영 Supabase URL만 포함되는지
@@ -214,7 +221,7 @@ pnpm --filter @wikirunner/extension build
 
 - [기획서](docs/기획서.md)
 - [아키텍처](docs/아키텍처.md)
-- [진행 현황](docs/진행현황.md)
+- [진행 현황 및 QA](docs/진행현황.md)
 - [아키텍처 결정 기록](docs/adr)
 
 ## 보안

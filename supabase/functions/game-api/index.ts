@@ -61,6 +61,8 @@ const redeemPairingCodeSchema = commandSchema.extend({
     .transform((value) => value.replace(/[^A-Z0-9]/g, ""))
     .pipe(z.string().length(8)),
 });
+const issueAutoPairingNonceSchema = commandSchema.extend({ playerId: z.string().uuid() });
+const redeemAutoPairingNonceSchema = commandSchema.extend({ nonce: z.string().uuid() });
 
 const disconnectExtensionSchema = commandSchema;
 
@@ -143,6 +145,7 @@ const reportFairPlayViolationSchema = commandSchema.extend({
   runId: z.string().uuid(),
   type: z.enum(["search_attempt", "new_tab"]),
 });
+const decideViolationSchema = commandSchema.extend({ violationId: z.string().uuid(), resolution: z.enum(["accepted", "disqualified"]), note: z.string().trim().max(500).default("") });
 
 const roomIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -302,8 +305,12 @@ Deno.serve(async (request) => {
       response = await submitGeneratedRandomPath(request, path, supabase, requestId);
     } else if (request.method === "POST" && path.match(/^\/v1\/players\/[^/]+\/pairing-code$/)) {
       response = await issuePairingCode(request, path, user.id, supabase, requestId);
+    } else if (request.method === "POST" && path.match(/^\/v1\/players\/[^/]+\/auto-pairing-nonce$/)) {
+      response = await issueAutoPairingNonce(request, path, supabase, requestId);
     } else if (request.method === "POST" && path === "/v1/extension/pair") {
       response = await redeemPairingCode(request, supabase, requestId);
+    } else if (request.method === "POST" && path === "/v1/extension/auto-pair") {
+      response = await redeemAutoPairingNonce(request, supabase, requestId);
     } else if (request.method === "POST" && path === "/v1/extension/disconnect") {
       response = await disconnectExtension(request, supabase, requestId);
     } else if (request.method === "PUT" && path.match(/^\/v1\/players\/[^/]+\/ready$/)) {
@@ -322,6 +329,10 @@ Deno.serve(async (request) => {
       response = await abandonRun(request, path, supabase, requestId);
     } else if (request.method === "POST" && path.match(/^\/v1\/games\/[^/]+\/violations$/)) {
       response = await reportFairPlayViolation(request, path, supabase, requestId);
+    } else if (request.method === "POST" && path.match(/^\/v1\/games\/[^/]+\/violations\/[^/]+\/decision$/)) {
+      response = await decideViolation(request, path, supabase, requestId);
+    } else if (request.method === "GET" && path.match(/^\/v1\/games\/[^/]+\/violations$/)) {
+      response = await getGameViolations(path, supabase, requestId);
     } else if (request.method === "GET" && path.match(/^\/v1\/rooms\/[^/]+\/snapshot$/)) {
       response = await getRoomSnapshot(path, supabase, requestId);
     } else if (request.method === "GET" && path.match(/^\/v1\/games\/[^/]+\/routes$/)) {
@@ -451,6 +462,40 @@ async function redeemPairingCode(
     return databaseErrorResponse(error, requestId);
   }
 
+  return successResponse(data);
+}
+
+async function issueAutoPairingNonce(
+  request: Request, path: string, supabase: SupabaseClient, requestId: string,
+): Promise<Response> {
+  const playerId = path.split("/")[3];
+  const input = await parseCommand(request, issueAutoPairingNonceSchema, requestId);
+  if (input instanceof Response) return input;
+  if (!playerId || input.playerId !== playerId) {
+    return errorResponse("INVALID_REQUEST", "요청 경로와 본문의 플레이어 ID가 일치하지 않습니다.", requestId, 400);
+  }
+  const nonce = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 60_000).toISOString();
+  const { data, error } = await supabase.rpc("issue_pairing_code", {
+    p_player_id: input.playerId,
+    p_code_hash: await hmacHex(pairingSecret(), nonce),
+    p_expires_at: expiresAt,
+    p_idempotency_key: input.idempotencyKey,
+  });
+  if (error) return databaseErrorResponse(error, requestId);
+  return successResponse({ ...asRecord(data), nonce, expiresAt });
+}
+
+async function redeemAutoPairingNonce(
+  request: Request, supabase: SupabaseClient, requestId: string,
+): Promise<Response> {
+  const input = await parseCommand(request, redeemAutoPairingNonceSchema, requestId);
+  if (input instanceof Response) return input;
+  const { data, error } = await supabase.rpc("redeem_pairing_code", {
+    p_code_hash: await hmacHex(pairingSecret(), input.nonce),
+    p_idempotency_key: input.idempotencyKey,
+  });
+  if (error) return databaseErrorResponse(error, requestId);
   return successResponse(data);
 }
 
@@ -752,6 +797,25 @@ async function reportFairPlayViolation(
     return databaseErrorResponse(error, requestId);
   }
   return successResponse(data);
+}
+
+async function decideViolation(request: Request, path: string, supabase: SupabaseClient, requestId: string): Promise<Response> {
+  const parts = path.split("/"); const gameId = parts[3]; const violationId = parts[5];
+  const input = await parseCommand(request, decideViolationSchema, requestId);
+  if (input instanceof Response) return input;
+  if (!gameId || !violationId || input.violationId !== violationId) return errorResponse("INVALID_REQUEST", "판정 대상이 올바르지 않습니다.", requestId, 400);
+  const { data, error } = await supabase.rpc("decide_violation", { p_violation_id: input.violationId, p_resolution: input.resolution, p_note: input.note, p_idempotency_key: input.idempotencyKey });
+  if (error) return databaseErrorResponse(error, requestId);
+  if (asRecord(data).gameId !== gameId) return errorResponse("INVALID_REQUEST", "경기와 경고가 일치하지 않습니다.", requestId, 400);
+  return successResponse(data);
+}
+
+async function getGameViolations(path: string, supabase: SupabaseClient, requestId: string): Promise<Response> {
+  const gameId = path.split("/")[3]; if (!gameId) return errorResponse("INVALID_REQUEST", "올바르지 않은 경기 ID입니다.", requestId, 400);
+  const { data, error } = await supabase.from("violations").select("id,run_id,type,resolution,detected_at,resolution_note,runs!inner(game_id,players!inner(nickname))").eq("runs.game_id", gameId);
+  if (error) return databaseErrorResponse(error, requestId);
+  const violations = (data ?? []).map((item: any) => ({ id: item.id, runId: item.run_id, nickname: item.runs.players.nickname, type: item.type, resolution: item.resolution, detectedAt: item.detected_at, resolutionNote: item.resolution_note }));
+  return successResponse({ gameId, violations });
 }
 
 async function updateRoomSettings(

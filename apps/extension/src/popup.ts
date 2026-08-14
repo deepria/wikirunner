@@ -1,4 +1,4 @@
-import { abandonRun, pairExtension } from "./game-api";
+import { abandonRun, getExtensionSnapshot, pairExtension } from "./game-api";
 
 const statusElement = document.querySelector<HTMLElement>("#status");
 const description = document.querySelector<HTMLElement>("#description");
@@ -8,6 +8,8 @@ const pairingButton = document.querySelector<HTMLButtonElement>("#pairing-button
 const pairingError = document.querySelector<HTMLElement>("#pairing-error");
 const gameControls = document.querySelector<HTMLElement>("#game-controls");
 const abandonButton = document.querySelector<HTMLButtonElement>("#abandon-button");
+const showOverlayButton = document.querySelector<HTMLButtonElement>("#show-overlay-button");
+const overlayRestoreControls = document.querySelector<HTMLElement>("#overlay-restore-controls");
 const abandonError = document.querySelector<HTMLElement>("#abandon-error");
 const connectionControls = document.querySelector<HTMLElement>("#connection-controls");
 const disconnectButton = document.querySelector<HTMLButtonElement>("#disconnect-button");
@@ -53,9 +55,11 @@ pairingForm?.addEventListener("submit", async (event) => {
 
   try {
     const result = await pairExtension(pairingCode);
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     await chrome.storage.local.set({
       activeRoomId: result.roomId,
       activePlayerId: result.playerId,
+      ...(typeof activeTab?.id === "number" ? { roomTabId: activeTab.id } : {}),
       pairedAt: result.pairedAt,
       lastGameOutcome: null,
       lastCompletedGame: null,
@@ -106,6 +110,32 @@ abandonButton?.addEventListener("click", async () => {
   } finally {
     abandonButton.disabled = false;
     abandonButton.textContent = "이번 경기 포기";
+  }
+});
+
+showOverlayButton?.addEventListener("click", async () => {
+  if (!showOverlayButton) {
+    return;
+  }
+  showOverlayButton.disabled = true;
+  try {
+    const response: unknown = await chrome.runtime.sendMessage({
+      type: "SET_OVERLAY_VISIBILITY",
+      visibility: "visible",
+    });
+    if (!isSuccessfulResponse(response)) {
+      throw new Error(
+        isErrorResponse(response) ? response.message : "경기 오버레이를 표시하지 못했습니다.",
+      );
+    }
+    showOverlayButton.hidden = true;
+  } catch (error) {
+    if (abandonError) {
+      abandonError.textContent =
+        error instanceof Error ? error.message : "경기 오버레이를 표시하지 못했습니다.";
+    }
+  } finally {
+    showOverlayButton.disabled = false;
   }
 });
 
@@ -192,8 +222,9 @@ generateRandomPathButton?.addEventListener("click", async () => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (
-    areaName === "local" &&
-    (changes.activeRoomId || changes.activeGame || changes.activeRun || changes.lastGameOutcome)
+    (areaName === "local" &&
+      (changes.activeRoomId || changes.activeGame || changes.activeRun || changes.lastGameOutcome)) ||
+    (areaName === "session" && changes.overlayVisibility)
   ) {
     void renderConnectionState();
   }
@@ -222,13 +253,12 @@ async function renderConnectionState() {
   if (typeof activeRoomId === "string") {
     updateWebNavigationControls(activeRoomId);
     connectionControls.hidden = false;
-    if (randomPathControls) {
-      randomPathControls.hidden = isActiveGame(activeGame) && isActiveRun(activeRun);
-    }
+    await updateRandomPathControls(activeRoomId, activeGame, activeRun);
     if (isActiveGame(activeGame) && isActiveRun(activeRun)) {
       statusElement.textContent = "경기 중";
       description.textContent = `목표: ${activeGame.targetArticleTitle}`;
       gameControls.hidden = false;
+      await updateOverlayControl();
       disconnectButton.disabled = true;
       disconnectButton.title = "경기를 포기한 뒤 연동을 해제할 수 있습니다.";
     } else {
@@ -239,6 +269,9 @@ async function renderConnectionState() {
           : "포기 처리가 완료됐습니다. 다음 경기 시작을 기다립니다."
         : "대기실과 연결되었습니다. 웹에서 준비 상태를 완료하세요.";
       gameControls.hidden = true;
+      if (overlayRestoreControls) {
+        overlayRestoreControls.hidden = true;
+      }
       disconnectButton.disabled = false;
       disconnectButton.title = "";
     }
@@ -251,8 +284,46 @@ async function renderConnectionState() {
   description.textContent = "웹 대기실에서 발급한 8자리 코드를 입력하세요.";
   pairingForm.hidden = false;
   gameControls.hidden = true;
+  if (overlayRestoreControls) {
+    overlayRestoreControls.hidden = true;
+  }
   connectionControls.hidden = true;
   if (randomPathControls) {
+    randomPathControls.hidden = true;
+  }
+}
+
+async function updateOverlayControl(): Promise<void> {
+  if (!showOverlayButton || !overlayRestoreControls) {
+    return;
+  }
+  const { overlayVisibility } = await chrome.storage.session.get("overlayVisibility");
+  overlayRestoreControls.hidden = overlayVisibility !== "hidden";
+}
+
+async function updateRandomPathControls(
+  activeRoomId: string,
+  activeGame: unknown,
+  activeRun: unknown,
+): Promise<void> {
+  if (!randomPathControls) {
+    return;
+  }
+
+  randomPathControls.hidden = true;
+  if (isActiveGame(activeGame) && isActiveRun(activeRun)) {
+    return;
+  }
+
+  try {
+    const snapshot = await getExtensionSnapshot(activeRoomId);
+    const currentPlayer = snapshot.players.find((player) => player.isCurrentPlayer);
+    randomPathControls.hidden = !(
+      snapshot.room.status === "waiting" &&
+      currentPlayer?.id === snapshot.room.hostPlayerId
+    );
+  } catch {
+    // 권한과 상태를 확인할 수 없을 때는 추첨 UI를 보수적으로 숨긴다.
     randomPathControls.hidden = true;
   }
 }
@@ -301,7 +372,10 @@ async function openWebPage(pathname: string) {
     url.pathname = `${url.pathname.replace(/\/$/, "")}${pathname}`;
     url.search = "";
     url.hash = "";
-    await chrome.tabs.create({ url: url.toString(), active: true });
+    const tab = await chrome.tabs.create({ url: url.toString(), active: true });
+    if (pathname.startsWith("/rooms/") && typeof tab.id === "number") {
+      await chrome.storage.local.set({ roomTabId: tab.id });
+    }
     window.close();
   } catch {
     if (webNavigationError) {
